@@ -3,9 +3,16 @@
 Gated behind LLM_ENABLED — refuses to spend money until you opt in by setting
 OPENAI_API_KEY and LLM_ENABLED=true in .env.
 
-Run: uv run python -m ml.data.llm_seed_labels
+Run (full ~2,000-example batch): uv run python -m ml.data.llm_seed_labels
+Cheap test run first (a few cents at most):
+  uv run python -m ml.data.llm_seed_labels --limit 20
+
+Sampling is seeded (settings.random_seed), so a small --limit run always picks
+a prefix of what a larger run would pick — a test run's labels are cached and
+reused by a later full run rather than re-billed.
 """
 
+import argparse
 import random
 import sys
 
@@ -51,6 +58,19 @@ def _parse_label(response: str) -> str:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=SEED_SET_SIZE,
+        help=(
+            f"Number of messages to label (default {SEED_SET_SIZE}, ~$0.50 total per SPEC). "
+            "Lower this for a cheap dry run, e.g. --limit 20 — costs a fraction of a cent and "
+            "pre-fills the cache, so a later full run reuses those labels instead of re-billing."
+        ),
+    )
+    args = parser.parse_args()
+
     settings = get_settings()
     if not settings.llm_enabled:
         print(
@@ -64,7 +84,7 @@ def main() -> None:
     session = SessionLocal()
     try:
         client = LLMClient(session, settings)
-        messages = _sample_messages(session, SEED_SET_SIZE, settings.random_seed)
+        messages = _sample_messages(session, args.limit, settings.random_seed)
         print(f"seed-labeling up to {len(messages)} messages (purpose={PURPOSE})")
 
         labeled = 0
