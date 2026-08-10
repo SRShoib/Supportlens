@@ -10,7 +10,7 @@ from api.db.models import AuthorRole, TicketSource
 from api.schemas.ticket import CanonicalMessage, CanonicalTicket
 
 from ml.data.cleaning import clean_text
-from ml.data.dedup import content_hash
+from ml.data.dedup import content_hash, dedup_messages
 from ml.data.ids import deterministic_id
 from ml.data.language import detect
 
@@ -47,6 +47,13 @@ def _is_inbound(raw: Any) -> bool:
     return str(raw).strip().lower() == "true"
 
 
+def _as_text(raw: Any) -> str:
+    # pandas represents a missing CSV field as float('nan') even under
+    # dtype=str, and NaN is truthy in Python, so `raw or ""` does not guard
+    # against it — an explicit isinstance check is required.
+    return raw if isinstance(raw, str) else ""
+
+
 class _UnionFind:
     """Path-compressed union-find over tweet ids. Reply edges (including a tweet
     replying to itself, or to an id absent from the file) merge branching reply
@@ -79,15 +86,25 @@ class ConversationSummary:
     start_time: datetime | None
     message_count: int
     tweet_ids: frozenset[str]
+    # Language of the chronologically first customer message — used by
+    # slice_builder's "keep en" filter. None means no customer message was
+    # found in the conversation (kept by default, same as low confidence).
+    root_lang: str | None
+    root_lang_confidence: float
 
 
 def _read_structure_chunks(csv_path: Path, chunksize: int) -> Iterator[pd.DataFrame]:
-    yield from pd.read_csv(csv_path, usecols=_STRUCTURE_COLUMNS, chunksize=chunksize, dtype=str)
+    # Reads the text column too (despite the name) because language detection
+    # needs it — only the small (lang, confidence) result is retained per row,
+    # not the text itself, so memory stays bounded regardless of corpus size.
+    yield from pd.read_csv(csv_path, usecols=_FULL_COLUMNS, chunksize=chunksize, dtype=str)
 
 
 def build_conversations(csv_path: Path, chunksize: int = 200_000) -> dict[str, ConversationSummary]:
-    """Pass A: group tweets into conversations via reply-chain union-find. Only
-    structure columns are read — message text never touches memory here."""
+    """Pass A: group tweets into conversations via reply-chain union-find, and
+    detect the language of each conversation's first customer message. Only
+    customer-authored rows are language-detected (agent replies don't affect
+    the "keep en" filter)."""
     union_find = _UnionFind()
     rows: dict[str, dict[str, Any]] = {}
 
@@ -95,10 +112,18 @@ def build_conversations(csv_path: Path, chunksize: int = 200_000) -> dict[str, C
         for row in chunk.itertuples(index=False):
             tweet_id = str(row.tweet_id)
             union_find.find(tweet_id)
+            inbound = _is_inbound(row.inbound)
+            lang: str | None = None
+            lang_confidence = 0.0
+            if inbound:
+                lang_result = detect(clean_text(_as_text(row.text)))
+                lang, lang_confidence = lang_result.lang, lang_result.confidence
             rows[tweet_id] = {
                 "author_id": row.author_id,
-                "inbound": _is_inbound(row.inbound),
+                "inbound": inbound,
                 "created_at": parse_created_at(row.created_at),
+                "lang": lang,
+                "lang_confidence": lang_confidence,
             }
             in_reply_to = row.in_response_to_tweet_id
             if isinstance(in_reply_to, str) and in_reply_to.strip():
@@ -119,12 +144,22 @@ def build_conversations(csv_path: Path, chunksize: int = 200_000) -> dict[str, C
         start_times = [
             rows[tid]["created_at"] for tid in tweet_ids if rows[tid]["created_at"] is not None
         ]
+        customer_tweet_ids = [tid for tid in tweet_ids if rows[tid]["inbound"]]
+        first_customer_id = (
+            min(customer_tweet_ids, key=lambda tid: rows[tid]["created_at"] or _MIN_DT)
+            if customer_tweet_ids
+            else None
+        )
         summaries[root] = ConversationSummary(
             root_id=root,
             brand=brand,
             start_time=min(start_times) if start_times else None,
             message_count=len(tweet_ids),
             tweet_ids=frozenset(tweet_ids),
+            root_lang=rows[first_customer_id]["lang"] if first_customer_id else None,
+            root_lang_confidence=(
+                rows[first_customer_id]["lang_confidence"] if first_customer_id else 0.0
+            ),
         )
     return summaries
 
@@ -174,12 +209,12 @@ def _build_ticket(summary: ConversationSummary, ordered: list[dict[str, Any]]) -
     # ticket's id collides with one of its own messages' ids (confirmed on the
     # real corpus: ~93% of conversations hit this).
     ticket_id = deterministic_id("ticket", TicketSource.TWITTER, summary.root_id)
-    messages: list[CanonicalMessage] = []
+    raw_messages: list[CanonicalMessage] = []
     for seq, m in enumerate(ordered):
-        raw_text = m["text"] or ""
+        raw_text = _as_text(m["text"])
         cleaned = clean_text(raw_text)
         lang_result = detect(cleaned)
-        messages.append(
+        raw_messages.append(
             CanonicalMessage(
                 id=deterministic_id("message", TicketSource.TWITTER, m["tweet_id"]),
                 seq=seq,
@@ -194,6 +229,15 @@ def _build_ticket(summary: ConversationSummary, ordered: list[dict[str, Any]]) -
             )
         )
 
+    # Dedup within this conversation only — never across tickets. twcs is full
+    # of legitimately repeated agent boilerplate ("Please DM us ^AB") across
+    # thousands of distinct real conversations; collapsing those cross-ticket
+    # would destroy real data. Re-numbering seq keeps it 0-indexed contiguous
+    # after any duplicates are dropped.
+    messages = list(dedup_messages(raw_messages))
+    for new_seq, message in enumerate(messages):
+        message.seq = new_seq
+
     return CanonicalTicket(
         id=ticket_id,
         source=TicketSource.TWITTER,
@@ -203,7 +247,7 @@ def _build_ticket(summary: ConversationSummary, ordered: list[dict[str, Any]]) -
         customer_id=None,
         brand=summary.brand,
         lang=messages[0].lang if messages else None,
-        meta={"message_count": summary.message_count},
+        meta={"message_count": len(messages), "raw_message_count": summary.message_count},
         messages=messages,
     )
 

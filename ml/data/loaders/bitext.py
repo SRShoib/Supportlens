@@ -5,7 +5,7 @@ from api.db.models import AuthorRole, TicketSource
 from api.schemas.ticket import CanonicalMessage, CanonicalTicket
 
 from ml.data.cleaning import clean_text
-from ml.data.dedup import content_hash
+from ml.data.dedup import content_hash, dedup_messages
 from ml.data.ids import deterministic_id
 from ml.data.language import detect
 
@@ -68,6 +68,13 @@ def iter_tickets(rows: Iterable[BitextRow] | None = None) -> Iterator[CanonicalT
             external_id=f"{external_id}-1",
         )
 
+        # Dedup within this ticket only, consistent with the Twitter loader —
+        # a no-op in practice for Bitext (instruction and response are never
+        # identical text), but keeps every loader applying the same pipeline.
+        messages = list(dedup_messages([customer_message, agent_message]))
+        for new_seq, message in enumerate(messages):
+            message.seq = new_seq
+
         yield CanonicalTicket(
             id=ticket_id,
             source=TicketSource.BITEXT,
@@ -82,5 +89,5 @@ def iter_tickets(rows: Iterable[BitextRow] | None = None) -> Iterator[CanonicalT
                 "category": row["category"],
                 "flags": row["flags"],
             },
-            messages=[customer_message, agent_message],
+            messages=messages,
         )

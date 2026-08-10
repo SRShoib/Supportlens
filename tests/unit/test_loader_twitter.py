@@ -8,7 +8,27 @@ FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "twcs_sample.csv"
 def test_conversation_grouping_counts() -> None:
     conversations = twitter.build_conversations(FIXTURE)
     counts = sorted(s.message_count for s in conversations.values())
-    assert counts == [1, 1, 1, 2, 3, 3]
+    assert counts == [1, 1, 1, 1, 2, 3, 3]
+
+
+def test_root_lang_detected_from_first_customer_message() -> None:
+    conversations = twitter.build_conversations(FIXTURE)
+    english = next(s for s in conversations.values() if "100" in s.tweet_ids)
+    spanish = next(s for s in conversations.values() if "500" in s.tweet_ids)
+
+    assert english.root_lang == "en"
+    assert spanish.root_lang == "es"
+    assert spanish.root_lang_confidence > 0.5
+
+
+def test_root_lang_none_when_no_customer_message() -> None:
+    # tweet 700 is a standalone agent broadcast (inbound=False, no
+    # in_response_to, no replies) — its solo conversation has no customer
+    # message at all, so root_lang must default to None (kept by design).
+    conversations = twitter.build_conversations(FIXTURE)
+    all_agent = next(s for s in conversations.values() if s.tweet_ids == frozenset({"700"}))
+    assert all_agent.root_lang is None
+    assert all_agent.root_lang_confidence == 0.0
 
 
 def test_branching_replies_merge_into_one_conversation() -> None:

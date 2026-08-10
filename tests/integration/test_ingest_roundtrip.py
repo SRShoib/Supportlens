@@ -51,10 +51,10 @@ def test_fixtures_ingest_with_correct_row_counts(db_session: Session) -> None:
     n_twitter = persist_tickets(db_session, twitter.iter_tickets(TWCS_FIXTURE))
 
     assert n_bitext == 5
-    assert n_twitter == 6
+    assert n_twitter == 7
 
     assert db_session.query(Ticket).count() == n_bitext + n_twitter
-    assert db_session.query(Message).count() == 5 * 2 + 11  # bitext: 2/ticket; twcs: 11 rows total
+    assert db_session.query(Message).count() == 5 * 2 + 12  # bitext: 2/ticket; twcs: 12 rows total
 
 
 def test_second_ingest_is_a_noop(db_session: Session) -> None:
