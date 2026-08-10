@@ -157,6 +157,14 @@ def main() -> None:
         eval_strategy="epoch",
         save_strategy="epoch",
         save_total_limit=1,
+        # We never resume a crashed run and only ever export the final
+        # weights (trainer.save_model below), so checkpoints don't need
+        # optimizer/scheduler state — only the model itself. AdamW's
+        # momentum buffers roughly double a checkpoint's size on top of the
+        # model weights; skipping them turned a real disk-space crash
+        # (DeBERTa-v3-small: ~1.7GB/checkpoint with optimizer state) into a
+        # ~560MB one.
+        save_only_model=True,
         load_best_model_at_end=True,
         metric_for_best_model="macro_f1",
         greater_is_better=True,
