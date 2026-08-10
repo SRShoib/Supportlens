@@ -1,16 +1,27 @@
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from itertools import islice
+from typing import Any
 
 from api.db.models import Message, Ticket
 from api.schemas.ticket import CanonicalTicket
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+# Postgres caps bind parameters at 65535 per statement. Chunking rows here
+# (independent of how many tickets are pulled per batch_size) keeps every
+# INSERT well under that regardless of column count.
+_MAX_ROWS_PER_INSERT = 1000
+
 
 def _batched(tickets: Iterable[CanonicalTicket], size: int) -> Iterator[list[CanonicalTicket]]:
     it = iter(tickets)
     while batch := list(islice(it, size)):
         yield batch
+
+
+def _chunked(rows: Sequence[dict[str, Any]], size: int) -> Iterator[Sequence[dict[str, Any]]]:
+    for i in range(0, len(rows), size):
+        yield rows[i : i + size]
 
 
 def persist_tickets(
@@ -36,10 +47,10 @@ def persist_tickets(
             }
             for t in batch
         ]
-        if ticket_rows:
+        for chunk in _chunked(ticket_rows, _MAX_ROWS_PER_INSERT):
             stmt = (
                 pg_insert(Ticket)
-                .values(ticket_rows)
+                .values(list(chunk))
                 .on_conflict_do_nothing(index_elements=["source", "external_id"])
             )
             session.execute(stmt)
@@ -62,10 +73,10 @@ def persist_tickets(
             for t in batch
             for m in t.messages
         ]
-        if message_rows:
+        for chunk in _chunked(message_rows, _MAX_ROWS_PER_INSERT):
             stmt = (
                 pg_insert(Message)
-                .values(message_rows)
+                .values(list(chunk))
                 .on_conflict_do_nothing(index_elements=["ticket_id", "seq"])
             )
             session.execute(stmt)

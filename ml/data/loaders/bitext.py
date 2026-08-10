@@ -34,7 +34,9 @@ def iter_tickets(rows: Iterable[BitextRow] | None = None) -> Iterator[CanonicalT
 
     for index, row in enumerate(source_rows):
         external_id = str(index)
-        ticket_id = deterministic_id(TicketSource.BITEXT, external_id)
+        # "ticket"/"message" discriminators keep ticket ids and message ids in
+        # disjoint id spaces even when their external_id strings could coincide.
+        ticket_id = deterministic_id("ticket", TicketSource.BITEXT, external_id)
 
         instruction = clean_text(row["instruction"])
         response = clean_text(row["response"])
@@ -42,7 +44,7 @@ def iter_tickets(rows: Iterable[BitextRow] | None = None) -> Iterator[CanonicalT
         response_lang = detect(response)
 
         customer_message = CanonicalMessage(
-            id=deterministic_id(TicketSource.BITEXT, external_id, "0"),
+            id=deterministic_id("message", TicketSource.BITEXT, external_id, "0"),
             seq=0,
             author_role=AuthorRole.CUSTOMER,
             text_raw=row["instruction"],
@@ -54,7 +56,7 @@ def iter_tickets(rows: Iterable[BitextRow] | None = None) -> Iterator[CanonicalT
             external_id=f"{external_id}-0",
         )
         agent_message = CanonicalMessage(
-            id=deterministic_id(TicketSource.BITEXT, external_id, "1"),
+            id=deterministic_id("message", TicketSource.BITEXT, external_id, "1"),
             seq=1,
             author_role=AuthorRole.AGENT,
             text_raw=row["response"],
