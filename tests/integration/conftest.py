@@ -41,8 +41,9 @@ def migrated_db(database_url: str) -> str:
     """Ensures the schema is at head before a test runs. Function-scoped and
     idempotent (a no-op if already at head) so it's safe regardless of what
     test_migrations.py's own upgrade/downgrade cycle did before this test."""
-    from alembic import command
     from alembic.config import Config
+
+    from alembic import command
 
     config = Config("alembic.ini")
     config.set_main_option("sqlalchemy.url", database_url)
