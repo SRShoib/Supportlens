@@ -76,6 +76,19 @@ def test_mojibake_repaired() -> None:
     assert "It's been broken" in mojibake_ticket.messages[0].text_clean
 
 
+def test_ticket_id_never_collides_with_a_message_id() -> None:
+    """The union-find root_id is always drawn from a real member tweet_id (e.g.
+    ticket "102" below has root "102" AND a message with external_id "102"), so
+    without a type discriminator in ml.data.ids.deterministic_id, the ticket's
+    id and that message's id would be identical UUIDs."""
+    tickets = list(twitter.iter_tickets(FIXTURE))
+    assert any(t.external_id == "102" for t in tickets), "fixture must exercise root==member case"
+
+    for ticket in tickets:
+        message_ids = {m.id for m in ticket.messages}
+        assert ticket.id not in message_ids
+
+
 def test_deterministic_ids_across_runs() -> None:
     run1 = list(twitter.iter_tickets(FIXTURE))
     run2 = list(twitter.iter_tickets(FIXTURE))

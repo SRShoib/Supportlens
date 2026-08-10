@@ -169,7 +169,11 @@ def _order_conversation(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _build_ticket(summary: ConversationSummary, ordered: list[dict[str, Any]]) -> CanonicalTicket:
-    ticket_id = deterministic_id(TicketSource.TWITTER, summary.root_id)
+    # "ticket"/"message" discriminators are required: the union-find root_id is
+    # always drawn from a real member tweet_id, so without a type prefix a
+    # ticket's id collides with one of its own messages' ids (confirmed on the
+    # real corpus: ~93% of conversations hit this).
+    ticket_id = deterministic_id("ticket", TicketSource.TWITTER, summary.root_id)
     messages: list[CanonicalMessage] = []
     for seq, m in enumerate(ordered):
         raw_text = m["text"] or ""
@@ -177,7 +181,7 @@ def _build_ticket(summary: ConversationSummary, ordered: list[dict[str, Any]]) -
         lang_result = detect(cleaned)
         messages.append(
             CanonicalMessage(
-                id=deterministic_id(TicketSource.TWITTER, m["tweet_id"]),
+                id=deterministic_id("message", TicketSource.TWITTER, m["tweet_id"]),
                 seq=seq,
                 author_role=AuthorRole.CUSTOMER if m["inbound"] else AuthorRole.AGENT,
                 text_raw=raw_text,
