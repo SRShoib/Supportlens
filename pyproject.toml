@@ -69,7 +69,7 @@ no_implicit_optional = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["datasets.*", "lingua.*", "emoji.*", "ftfy.*", "spacy.*", "testcontainers.*"]
+module = ["datasets.*", "lingua.*", "emoji.*", "ftfy.*", "spacy.*", "testcontainers.*", "pandas.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

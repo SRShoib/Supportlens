@@ -1,0 +1,5 @@
+{"flags": "B", "instruction": "I want to cancel my order", "category": "ORDER", "intent": "cancel_order", "response": "I understand you want to cancel your order. Could you share the order number?"}
+{"flags": "BQ", "instruction": "how can i track my package", "category": "DELIVERY", "intent": "track_order", "response": "You can track your package using the tracking link sent to your email."}
+{"flags": "B", "instruction": "I need to change my delivery address", "category": "SHIPPING_ADDRESS", "intent": "change_shipping_address", "response": "Sure, please provide your order number and the new address."}
+{"flags": "BL", "instruction": "where is the nearest store", "category": "STORE", "intent": "find_nearest_store", "response": "I can help with that. Could you tell me your city or zip code?"}
+{"flags": "B", "instruction": "I want a refund for my last purchase", "category": "REFUND", "intent": "get_refund", "response": "I'm sorry to hear that. Let's get your refund started, can you share the order ID?"}
