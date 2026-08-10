@@ -8,7 +8,13 @@ _BASE = datetime(2017, 1, 1, tzinfo=UTC)
 
 
 def _make_conversation(
-    root: str, brand: str, week_offset: int, message_count: int
+    root: str,
+    brand: str,
+    week_offset: int,
+    message_count: int,
+    *,
+    root_lang: str | None = "en",
+    root_lang_confidence: float = 0.99,
 ) -> ConversationSummary:
     return ConversationSummary(
         root_id=root,
@@ -16,6 +22,8 @@ def _make_conversation(
         start_time=_BASE + timedelta(weeks=week_offset),
         message_count=message_count,
         tweet_ids=frozenset({root}),
+        root_lang=root_lang,
+        root_lang_confidence=root_lang_confidence,
     )
 
 
@@ -110,6 +118,57 @@ def test_different_seed_can_change_selection() -> None:
     )
 
     assert result_a.selected_roots != result_b.selected_roots
+
+
+def test_non_english_conversations_excluded_from_slice() -> None:
+    conversations = {
+        f"en-{i}": _make_conversation(f"en-{i}", "OnlyBrand", i % 5, message_count=5)
+        for i in range(50)
+    }
+    conversations["es-1"] = _make_conversation(
+        "es-1", "OnlyBrand", 0, message_count=5, root_lang="es", root_lang_confidence=0.95
+    )
+
+    result = build_slice(
+        conversations, SliceConfig(target_messages=1000, max_brand_share=1.0, seed=42)
+    )
+
+    assert "es-1" not in result.selected_roots
+
+
+def test_low_confidence_non_english_kept_by_design() -> None:
+    """Short/ambiguous text ("thx!!") shouldn't be dropped just because the
+    language detector isn't confident — only a confident non-English call
+    excludes a conversation."""
+    conversations = {
+        f"en-{i}": _make_conversation(f"en-{i}", "OnlyBrand", i % 5, message_count=5)
+        for i in range(20)
+    }
+    conversations["ambiguous-1"] = _make_conversation(
+        "ambiguous-1", "OnlyBrand", 0, message_count=5, root_lang="fr", root_lang_confidence=0.3
+    )
+
+    result = build_slice(
+        conversations, SliceConfig(target_messages=1000, max_brand_share=1.0, seed=42)
+    )
+
+    assert "ambiguous-1" in result.selected_roots
+
+
+def test_unknown_language_kept_by_design() -> None:
+    conversations = {
+        f"en-{i}": _make_conversation(f"en-{i}", "OnlyBrand", i % 5, message_count=5)
+        for i in range(20)
+    }
+    conversations["no-customer-msg"] = _make_conversation(
+        "no-customer-msg", "OnlyBrand", 0, message_count=5, root_lang=None, root_lang_confidence=0.0
+    )
+
+    result = build_slice(
+        conversations, SliceConfig(target_messages=1000, max_brand_share=1.0, seed=42)
+    )
+
+    assert "no-customer-msg" in result.selected_roots
 
 
 def test_empty_corpus_returns_empty_slice() -> None:

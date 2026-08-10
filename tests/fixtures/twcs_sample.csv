@@ -10,3 +10,4 @@ tweet_id,author_id,inbound,created_at,text,response_tweet_id,in_response_to_twee
 500,55555,True,Sat Nov 04 12:00:00 +0000 2017,"Mi pedido llegó dañado, necesito ayuda por favor",501,
 501,AmazonHelp,False,Sat Nov 04 12:10:00 +0000 2017,Lamentamos mucho escuchar eso. Le ayudaremos enseguida.,,500
 600,66666,True,Sun Nov 05 15:00:00 +0000 2017,"Itâ€™s been broken since yesterday, please help @AppleSupport",,
+700,AppleSupport,False,Mon Nov 06 09:00:00 +0000 2017,"We are currently experiencing a service outage, updates to follow.",,

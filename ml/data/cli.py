@@ -53,6 +53,7 @@ def _build_slice(args: argparse.Namespace) -> None:
         target_messages=args.target_messages or settings.slice_target_messages,
         max_brand_share=args.max_brand_share or settings.slice_max_brand_share,
         seed=settings.random_seed,
+        lang_confidence_threshold=settings.lang_confidence_threshold,
     )
     result = build_slice(conversations, config)
     save_slice(result, slice_path)

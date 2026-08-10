@@ -17,6 +17,7 @@ class SliceConfig:
     target_messages: int = 150_000
     max_brand_share: float = 0.08
     seed: int = 42
+    lang_confidence_threshold: float = 0.70
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,17 @@ class SliceResult:
     selected_roots: frozenset[str]
     config: SliceConfig
     brand_message_counts: dict[str, int] = field(default_factory=dict)
+
+
+def _is_english_eligible(summary: ConversationSummary, lang_confidence_threshold: float) -> bool:
+    """ "Keep en": a conversation is eligible unless its first customer message
+    is confidently detected as a language other than English. Unknown (no
+    customer message found) or low-confidence detections are kept by design —
+    short/ambiguous text like "thx!!" shouldn't be dropped just because the
+    detector is unsure."""
+    if summary.root_lang is None or summary.root_lang == "en":
+        return True
+    return summary.root_lang_confidence < lang_confidence_threshold
 
 
 def _week_bucket(summary: ConversationSummary) -> str:
@@ -63,16 +75,25 @@ def _capped_shares(natural_shares: Mapping[str, float], cap: float) -> dict[str,
 def build_slice(
     conversations: Mapping[str, ConversationSummary], config: SliceConfig | None = None
 ) -> SliceResult:
-    """Sample whole conversations, brand-capped and time-spread. Brand share of the
-    message target is min(natural_share, max_brand_share) with the remainder
-    redistributed to the long tail; within a brand, conversations are drawn evenly
-    across weekly buckets so the slice spans the full corpus date range."""
+    """Sample whole conversations, brand-capped, time-spread, and English-only
+    ("keep en" — SPEC's language filter). Brand share of the message target is
+    min(natural_share, max_brand_share) with the remainder redistributed to
+    the long tail; within a brand, conversations are drawn evenly across
+    weekly buckets so the slice spans the full corpus date range. Nothing is
+    ever deleted from Postgres by this filter — non-English conversations
+    simply never enter the pool this function samples from."""
     config = config or SliceConfig()
+    eligible = {
+        root: summary
+        for root, summary in conversations.items()
+        if _is_english_eligible(summary, config.lang_confidence_threshold)
+    }
+
     by_brand: dict[str, list[ConversationSummary]] = defaultdict(list)
-    for summary in conversations.values():
+    for summary in eligible.values():
         by_brand[summary.brand or _UNKNOWN_BRAND].append(summary)
 
-    total_messages = sum(s.message_count for s in conversations.values())
+    total_messages = sum(s.message_count for s in eligible.values())
     if total_messages == 0:
         return SliceResult(selected_roots=frozenset(), config=config)
 
@@ -136,6 +157,7 @@ def save_slice(result: SliceResult, path: Path) -> None:
             {
                 "target_messages": result.config.target_messages,
                 "max_brand_share": result.config.max_brand_share,
+                "lang_confidence_threshold": result.config.lang_confidence_threshold,
                 "seed": result.config.seed,
                 "num_conversations": len(result.selected_roots),
                 "brand_message_counts": result.brand_message_counts,
