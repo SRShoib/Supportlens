@@ -8,7 +8,6 @@ from api.db.models import Message, Ticket
 from api.db.session import make_engine
 from api.main import app
 from fastapi.testclient import TestClient
-from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from ml.data.loaders import bitext, twitter
@@ -23,18 +22,6 @@ TWCS_FIXTURE = FIXTURES / "twcs_sample.csv"
 def _bitext_rows() -> list[bitext.BitextRow]:
     with (FIXTURES / "bitext_sample.jsonl").open(encoding="utf-8") as f:
         return [json.loads(line) for line in f]
-
-
-@pytest.fixture
-def db_session(migrated_db: str) -> Iterator[Session]:
-    engine = make_engine(migrated_db)
-    session = sessionmaker(bind=engine)()
-    # The container is session-scoped for speed, so start every test from a
-    # clean slate rather than accumulating rows across tests in this file.
-    session.execute(text("TRUNCATE TABLE predictions, messages, tickets, eval_runs CASCADE"))
-    session.commit()
-    yield session
-    session.close()
 
 
 @pytest.fixture

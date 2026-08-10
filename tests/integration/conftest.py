@@ -1,6 +1,9 @@
 from collections.abc import Iterator
 
 import pytest
+from api.db.session import make_engine
+from sqlalchemy import text
+from sqlalchemy.orm import Session, sessionmaker
 from testcontainers.community.postgres import PostgresContainer
 
 
@@ -49,3 +52,17 @@ def migrated_db(database_url: str) -> str:
     config.set_main_option("sqlalchemy.url", database_url)
     command.upgrade(config, "head")
     return database_url
+
+
+@pytest.fixture
+def db_session(migrated_db: str) -> Iterator[Session]:
+    engine = make_engine(migrated_db)
+    session = sessionmaker(bind=engine)()
+    # The container is session-scoped for speed, so start every test from a
+    # clean slate rather than accumulating rows across tests in this module.
+    session.execute(
+        text("TRUNCATE TABLE predictions, messages, tickets, eval_runs, llm_calls CASCADE")
+    )
+    session.commit()
+    yield session
+    session.close()
