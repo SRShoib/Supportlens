@@ -1,0 +1,12 @@
+tweet_id,author_id,inbound,created_at,text,response_tweet_id,in_response_to_tweet_id
+100,11111,True,Tue Oct 31 20:00:00 +0000 2017,@AppleSupport my phone won't charge at all,101,
+101,AppleSupport,False,Tue Oct 31 20:05:00 +0000 2017,Sorry to hear that! Which model do you have?,102,100
+102,11111,True,Tue Oct 31 20:10:00 +0000 2017,"iPhone 8, started after the last update",,101
+200,22222,True,Wed Nov 01 10:00:00 +0000 2017,@AmazonHelp my order never arrived,"201,202",
+201,AmazonHelp,False,Wed Nov 01 10:05:00 +0000 2017,We're sorry! Can you share the order number?,,200
+202,AmazonHelp,False,Wed Nov 01 10:06:00 +0000 2017,"Also, when did you place the order?",,200
+300,33333,True,Thu Nov 02 08:00:00 +0000 2017,Anyone from support around?,,300
+400,44444,True,Fri Nov 03 09:00:00 +0000 2017,Following up on my earlier ticket,,9999
+500,55555,True,Sat Nov 04 12:00:00 +0000 2017,"Mi pedido llegó dañado, necesito ayuda por favor",501,
+501,AmazonHelp,False,Sat Nov 04 12:10:00 +0000 2017,Lamentamos mucho escuchar eso. Le ayudaremos enseguida.,,500
+600,66666,True,Sun Nov 05 15:00:00 +0000 2017,"Itâ€™s been broken since yesterday, please help @AppleSupport",,
