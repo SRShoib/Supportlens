@@ -1,7 +1,7 @@
 import pytest
+from alembic.config import Config
 
 from alembic import command
-from alembic.config import Config
 
 pytestmark = pytest.mark.integration
 
