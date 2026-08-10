@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.python-version
+
+# Test / lint / type caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Data & models (raw downloads, artifacts — never committed)
+data/raw/*
+data/interim/*
+data/splits/*
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/splits/.gitkeep
+models/*
+!models/.gitkeep
+.chroma/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Node (dashboard, later modules)
+node_modules/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Alembic-generated local artifacts
+*.sqlite3
