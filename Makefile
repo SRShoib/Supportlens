@@ -1,11 +1,17 @@
 COMPOSE = docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: install dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice seed eval tokenization-doc
+.PHONY: install install-training dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency
 
 install:
-	uv sync --all-groups
+	uv sync
 	uv run pre-commit install
 	uv run pre-commit install --hook-type pre-push
+
+# Opt-in only (transformers/accelerate/evaluate, plus a CPU torch pulled in
+# transitively). Do NOT run this expecting GPU training to work afterward —
+# see docs/decisions.md for the separate CUDA torch install command.
+install-training:
+	uv sync --group training
 
 dev:
 	$(COMPOSE) up -d --wait postgres chroma
@@ -41,7 +47,7 @@ cov-clean:
 lint:
 	uv run ruff check .
 	uv run ruff format --check .
-	uv run mypy apps/api ml/inference ml/data
+	uv run mypy apps/api ml/inference ml/data ml/evaluation
 
 fmt:
 	uv run ruff check --fix .
@@ -66,7 +72,19 @@ seed:
 	uv run python -m ml.data.cli seed
 
 eval:
-	@echo "eval harness lands in M2 (ml/evaluation)"
+	uv run python scripts/generate_baseline_report.py
 
 tokenization-doc:
 	uv run python scripts/compare_tokenization.py
+
+build-splits:
+	uv run python -m ml.training.splits
+
+train-baseline-intent:
+	uv run python -m ml.training.train_baseline_intent
+
+train-baseline-urgency:
+	uv run python -m ml.training.train_baseline_urgency
+
+seed-label-urgency:
+	uv run python -m ml.data.llm_seed_labels
