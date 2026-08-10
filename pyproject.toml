@@ -11,6 +11,9 @@ dependencies = [
     "sqlalchemy>=2.0",
     "alembic>=1.14",
     "psycopg[binary]>=3.2",
+    "scikit-learn>=1.5",
+    "joblib>=1.4",
+    "openai>=1.54",
 ]
 
 [dependency-groups]
@@ -34,6 +37,16 @@ dev = [
     "ruff>=0.8",
     "mypy>=1.13",
     "pre-commit>=4.0",
+]
+# GPU fine-tuning deps (M3+). Deliberately excluded from default-groups so a
+# plain `uv sync` / CI never pulls these. Torch itself is NOT listed here —
+# CLAUDE.md requires the CUDA build to be a manual one-time install matching
+# the local driver, documented in docs/decisions.md, not lockfile-pinned.
+training = [
+    "transformers>=4.46",
+    "accelerate>=1.0",
+    "evaluate>=0.4",
+    "pyyaml>=6.0",
 ]
 
 [tool.uv]
@@ -69,7 +82,21 @@ no_implicit_optional = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["datasets.*", "lingua.*", "emoji.*", "ftfy.*", "spacy.*", "testcontainers.*", "pandas.*"]
+module = [
+    "datasets.*",
+    "lingua.*",
+    "emoji.*",
+    "ftfy.*",
+    "spacy.*",
+    "testcontainers.*",
+    "pandas.*",
+    "sklearn.*",
+    "joblib.*",
+    "transformers.*",
+    "accelerate.*",
+    "evaluate.*",
+    "yaml.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

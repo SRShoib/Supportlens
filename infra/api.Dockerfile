@@ -15,6 +15,7 @@ RUN groupadd --system app && useradd --system --gid app --home-dir /app app
 COPY --from=deps /app/.venv /app/.venv
 COPY pyproject.toml uv.lock README.md ./
 COPY apps/api ./apps/api
+COPY ml ./ml
 RUN uv sync --frozen --no-dev --no-group ml
 ENV PATH="/app/.venv/bin:$PATH"
 USER app

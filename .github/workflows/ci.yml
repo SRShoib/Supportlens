@@ -20,13 +20,16 @@ jobs:
 
       - run: uv python install 3.11
 
-      - run: uv sync --all-groups --frozen
+      # Default groups only (ml + dev) — the `training` group (transformers/
+      # accelerate/torch) is GPU-fine-tuning-only and deliberately excluded
+      # from CI, matching CLAUDE.md's "no training in this repo's runtime."
+      - run: uv sync --frozen
 
       - run: uv run ruff check .
 
       - run: uv run ruff format --check .
 
-      - run: uv run mypy apps/api ml/inference ml/data
+      - run: uv run mypy apps/api ml/inference ml/data ml/evaluation
 
       - run: uv run pytest tests/unit --cov=ml.data.cleaning --cov=ml.data.masking --cov=ml.data.dedup --cov-fail-under=95
 

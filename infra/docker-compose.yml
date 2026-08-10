@@ -42,6 +42,11 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     ports:
       - "${API_PORT}:8000"
+    volumes:
+      # Read-only: dropping a newly trained model in models/ takes effect on
+      # container restart, no image rebuild needed — deploying code and
+      # deploying a model are deliberately decoupled.
+      - ../models:/app/models:ro
     depends_on:
       postgres:
         condition: service_healthy
