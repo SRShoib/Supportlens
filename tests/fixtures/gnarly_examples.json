@@ -1,0 +1,22 @@
+[
+  {"id": 1, "note": "URL + handle", "text": "@AppleSupport check https://apple.com/support now!!"},
+  {"id": 2, "note": "email address", "text": "please email me at john.doe@example.com asap"},
+  {"id": 3, "note": "elongation", "text": "this is sooooooo frustrating omg"},
+  {"id": 4, "note": "unicode emoji", "text": "thanks so much 🙏🙏 you guys rock ❤️"},
+  {"id": 5, "note": "ascii emoticon", "text": "not happy about this :-("},
+  {"id": 6, "note": "hashtags", "text": "worst customer service ever #fail #neveragain"},
+  {"id": 7, "note": "all caps + punctuation run", "text": "WHY IS MY ORDER STILL NOT HERE???"},
+  {"id": 8, "note": "contractions", "text": "I can't believe this isn't fixed yet"},
+  {"id": 9, "note": "slang / abbreviation", "text": "wtf is going on w/ my acct rn"},
+  {"id": 10, "note": "order id + amount", "text": "Order #A1B2-99231 for $129.99 never shipped"},
+  {"id": 11, "note": "repeated handle + emoji", "text": "DM'd @AmazonHelp 3x 😡 no response"},
+  {"id": 12, "note": "misspellings", "text": "recieved a damgaed package yesterday"},
+  {"id": 13, "note": "date + duration", "text": "still waiting since 03/14/2023, its been 2 months"},
+  {"id": 14, "note": "repeated punctuation", "text": "please help me!!!!! this is urgent....."},
+  {"id": 15, "note": "multiple handles", "text": "cc @AppleSupport @tim_cook fix this now"},
+  {"id": 16, "note": "currency symbol variety", "text": "charged £45.00 instead of £39.99, refund pls"},
+  {"id": 17, "note": "accented non-English", "text": "mi pedido llegó roto, ¡ayuda por favor!"},
+  {"id": 18, "note": "error code", "text": "error code E-4042 keeps popping up on checkout"},
+  {"id": 19, "note": "laughing abbreviation", "text": "lol this app is a joke, crashed again lmaooo"},
+  {"id": 20, "note": "combined run-on", "text": "@AmazonHelp order #998-2231 was supposed to arrive 5/1 but STILL nothing!! called 3x, no fix 😤 #terrible"}
+]
