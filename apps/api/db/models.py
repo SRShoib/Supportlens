@@ -121,6 +121,31 @@ class Prediction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class LLMCall(Base):
+    """Every OpenAI call, ever (CLAUDE.md hard rule) — the row set doubles as
+    the persisted spend counter (SUM(cost_usd)) and a cache: a repeated
+    (purpose, model, prompt_hash) reuses the cached response instead of
+    re-billing."""
+
+    __tablename__ = "llm_calls"
+    __table_args__ = (
+        UniqueConstraint("purpose", "model", "prompt_hash", name="llm_calls_cache_key"),
+        Index("ix_llm_calls_purpose_created_at", "purpose", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    purpose: Mapped[str] = mapped_column(String, nullable=False)
+    model: Mapped[str] = mapped_column(String, nullable=False)
+    prompt_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    response: Mapped[str] = mapped_column(String, nullable=False)
+    prompt_tokens: Mapped[int] = mapped_column(nullable=False)
+    completion_tokens: Mapped[int] = mapped_column(nullable=False)
+    cost_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class EvalRun(Base):
     __tablename__ = "eval_runs"
     __table_args__ = (Index("ix_eval_runs_task_started_at", "task", "started_at"),)
