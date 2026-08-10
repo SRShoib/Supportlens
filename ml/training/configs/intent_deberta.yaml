@@ -1,0 +1,9 @@
+model_name: microsoft/deberta-v3-small
+task: intent
+num_epochs: 3
+batch_size: 32
+eval_batch_size: 64
+learning_rate: 1.0e-5
+max_seq_length: 64
+warmup_ratio: 0.1
+weight_decay: 0.01

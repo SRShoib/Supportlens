@@ -43,10 +43,18 @@ dev = [
 # CLAUDE.md requires the CUDA build to be a manual one-time install matching
 # the local driver, documented in docs/decisions.md, not lockfile-pinned.
 training = [
-    "transformers>=4.46",
+    # Upper-bounded: transformers 5.x (as of this writing) has a tokenizer-
+    # conversion regression that breaks loading microsoft/deberta-v3-small's
+    # SentencePiece tokenizer (misroutes it through a tiktoken BPE parser).
+    # Confirmed broken on 5.15.0; the well-established 4.x series does not
+    # have this bug. Revisit this pin once upstream fixes it.
+    "transformers>=4.46,<5.0",
     "accelerate>=1.0",
     "evaluate>=0.4",
     "pyyaml>=6.0",
+    "sentencepiece>=0.2",
+    "tiktoken>=0.8",
+    "protobuf>=5.0",
 ]
 
 [tool.uv]

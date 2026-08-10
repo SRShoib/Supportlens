@@ -51,3 +51,38 @@ invariants that actually broke (id uniqueness, per-statement row limits).
 **How to apply:** when a data-shape property depends on volume/structure (dedup collision rates, batch
 sizes vs. DB limits), test it against something closer to real scale, or at minimum add an explicit
 invariant assertion (e.g. "no id collision") rather than only checking round-trip/determinism properties.
+
+## 2026-08-10 — models/ is a mounted volume, not baked into the API image
+
+**Decision:** `infra/docker-compose.yml`'s `api` service mounts `../models:/app/models:ro` instead of the
+Dockerfile `COPY`-ing `models/` into the image.
+**Why:** M2 onward, the API needs to load real trained artifacts to serve predictions. Baking them into the
+image would mean every newly trained model (M2's baseline today, M3-M6's transformers later) requires a
+full image rebuild to deploy — coupling "ship new code" to "ship a new model" for no reason. A read-only
+bind mount means dropping a new model into `models/` takes effect on container restart.
+**Alternatives:** `COPY models ./models` in the Dockerfile — rejected for the coupling problem above, and
+because it would keep growing the image size as more models accumulate through M2-M6.
+
+## 2026-08-10 — transformers pinned below 5.0 for the training group
+
+**Decision:** `pyproject.toml`'s `training` dependency group pins `transformers>=4.46,<5.0`.
+**Why:** the open-ended `>=4.46` resolved to 5.15.0 in practice, which has a tokenizer-conversion bug that
+breaks loading `microsoft/deberta-v3-small` specifically — it misroutes the model's SentencePiece file
+through a tiktoken BPE-ranks parser and crashes (`ValueError: Error parsing line ... in spm.model`). Caught
+by CPU-smoke-testing `ml/training/train_transformer.py` before handing it off, not by reasoning about it in
+advance. The well-established 4.x series does not have this bug. Revisit the pin once upstream fixes it.
+**Alternatives:** patch around it with `use_fast=False` — tried first, doesn't help, the broken conversion
+path runs regardless of the fast/slow tokenizer flag.
+
+## 2026-08-10 — CUDA torch install (RTX 4060 Ti, driver 591.86)
+
+**Decision:** torch is never a pinned dependency in `pyproject.toml` (any group). `make install-training`
+pulls in a CPU-only torch transitively via `accelerate` (which hard-requires torch); the human then runs
+`uv pip install torch --index-url https://download.pytorch.org/whl/cu124` once, manually, to replace it
+with the CUDA build.
+**Why:** CLAUDE.md requires the CUDA build to match the local driver and be a manual one-time install, not
+lockfile-pinned the way CPU deps are — a pinned torch version in the shared lockfile would either force a
+CPU-only build on everyone (breaking GPU training) or force a specific CUDA version that may not match
+whoever's driver is running it.
+**How to apply:** documented in full in `docs/m3-how-to-run-locally.md`; this entry exists so the "why not
+just pin it" question has a permanent answer.
