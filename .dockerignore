@@ -1,0 +1,17 @@
+.git
+.github
+data/
+models/
+tests/
+notebooks/
+docs/
+scripts/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+*.md
+!README.md
+.env
+.pre-commit-config.yaml
