@@ -41,3 +41,16 @@ def test_per_class_f1_has_entry_for_every_label() -> None:
 def test_labels_preserved_in_order() -> None:
     metrics = compute_classification_metrics(["x", "y"], ["x", "y"], labels=["y", "x"])
     assert metrics.labels == ["y", "x"]
+
+
+def test_to_metrics_dict_keys_are_exactly_the_persisted_columns() -> None:
+    # Regression guard: scripts/generate_m3_report.py reads run.metrics["macro_f1"]
+    # etc. directly from persisted EvalRun rows. Any drift here silently breaks
+    # that report.
+    metrics = compute_classification_metrics(["a", "b"], ["a", "b"], labels=["a", "b"])
+    assert set(metrics.to_metrics_dict()) == {
+        "macro_f1",
+        "per_class_f1",
+        "confusion_matrix",
+        "labels",
+    }
