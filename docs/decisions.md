@@ -74,6 +74,31 @@ advance. The well-established 4.x series does not have this bug. Revisit the pin
 **Alternatives:** patch around it with `use_fast=False` — tried first, doesn't help, the broken conversion
 path runs regardless of the fast/slow tokenizer flag.
 
+## 2026-08-11 — a new `serving` dependency group, separate from `training`
+
+**Decision:** `pyproject.toml` gets a `serving` group (`transformers<5.0`, `torch>=2.2`, `sentencepiece`,
+`protobuf`) — excluded from `default-groups` like `training`, but synced explicitly in
+`infra/api.Dockerfile` (both build stages) and in CI (`uv sync --frozen --group serving`). Unlike
+`training`, torch **is** pinned directly here.
+**Why:** M3's accept criterion is a real API flag that serves live transformer inference (SPEC: "API flag
+switches baseline/transformer per request"), not just an export step — so `ml/inference/transformer.py`
+needs `transformers`+`torch` at API runtime, in Docker and in CI, not just on the training machine. This is
+CPU-only inference of an already-exported model, not a GPU dependency, so it doesn't conflict with CLAUDE.md's
+"never add GPU deps to the API image" rule — that rule is about CUDA/training deps specifically. Pinning
+torch normally is safe here because there's no CUDA-driver-match constraint for CPU serving in an isolated
+Docker/CI environment, unlike local GPU training.
+**How to apply:** never run `uv sync --group serving` on the same local venv used for GPU training — it
+would pull a default (CPU) torch resolution and silently replace the manually-installed CUDA build documented
+above. Locally, the already-installed `training` group (torch + transformers) is a superset that covers the
+same import surface for testing `ml/inference/transformer.py`, so `serving` never needs to be synced outside
+Docker/CI. Image size grows accordingly (torch CPU + transformers ~1-2GB on top of the sklearn-only baseline
+image); trimming it via a CPU-specific torch index or ONNX quantization is a documented future optimization
+(SPEC M3 explicitly frames ONNX quantization as optional), not required for M3's accept criteria.
+**Alternatives:** bake a slimmer CPU-only torch wheel via a dedicated PyPI index — rejected for now to avoid
+the added complexity of per-group index scoping in `[tool.uv.sources]` risking an accidental clobber of the
+training group's manual CUDA install; ONNX-export the transformer models instead of serving raw
+safetensors — deferred, real optimization work beyond what M3 requires.
+
 ## 2026-08-10 — CUDA torch install (RTX 4060 Ti, driver 591.86)
 
 **Decision:** torch is never a pinned dependency in `pyproject.toml` (any group). `make install-training`

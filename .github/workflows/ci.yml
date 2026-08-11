@@ -20,10 +20,11 @@ jobs:
 
       - run: uv python install 3.11
 
-      # Default groups only (ml + dev) — the `training` group (transformers/
-      # accelerate/torch) is GPU-fine-tuning-only and deliberately excluded
-      # from CI, matching CLAUDE.md's "no training in this repo's runtime."
-      - run: uv sync --frozen
+      # Default groups (ml + dev) plus `serving` — the API's real CPU
+      # transformer-inference path (M3) is production code and gets tested
+      # for real, unlike `training` (GPU-fine-tuning-only, deliberately
+      # excluded, matching CLAUDE.md's "no training in this repo's runtime").
+      - run: uv sync --frozen --group serving
 
       - run: uv run ruff check .
 

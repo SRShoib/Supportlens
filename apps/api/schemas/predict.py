@@ -1,8 +1,11 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
 class PredictRequest(BaseModel):
     texts: list[str] = Field(min_length=1, max_length=100)
+    model: Literal["baseline", "transformer"] = "baseline"
 
 
 class TaskResultOut(BaseModel):

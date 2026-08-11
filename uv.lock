@@ -1910,6 +1910,12 @@ ml = [
     { name = "spacy" },
     { name = "tokenizers" },
 ]
+serving = [
+    { name = "protobuf" },
+    { name = "sentencepiece" },
+    { name = "torch" },
+    { name = "transformers" },
+]
 training = [
     { name = "accelerate" },
     { name = "evaluate" },
@@ -1954,6 +1960,12 @@ ml = [
     { name = "pyarrow", specifier = ">=18.0" },
     { name = "spacy", specifier = ">=3.8" },
     { name = "tokenizers", specifier = ">=0.20" },
+]
+serving = [
+    { name = "protobuf", specifier = ">=5.0" },
+    { name = "sentencepiece", specifier = ">=0.2" },
+    { name = "torch", specifier = ">=2.2" },
+    { name = "transformers", specifier = ">=4.46,<5.0" },
 ]
 training = [
     { name = "accelerate", specifier = ">=1.0" },

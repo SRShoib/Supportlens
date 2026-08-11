@@ -8,7 +8,10 @@ WORKDIR /app
 
 FROM base AS deps
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-group ml --no-install-project
+# `serving` adds transformers+torch (CPU) so the API can load real M3
+# transformer exports — not a GPU dep, just larger than the sklearn-only
+# baseline image (see docs/decisions.md).
+RUN uv sync --frozen --no-dev --no-group ml --group serving --no-install-project
 
 FROM base AS runtime
 RUN groupadd --system app && useradd --system --gid app --home-dir /app app
@@ -16,7 +19,7 @@ COPY --from=deps /app/.venv /app/.venv
 COPY pyproject.toml uv.lock README.md ./
 COPY apps/api ./apps/api
 COPY ml ./ml
-RUN uv sync --frozen --no-dev --no-group ml
+RUN uv sync --frozen --no-dev --no-group ml --group serving
 ENV PATH="/app/.venv/bin:$PATH"
 USER app
 
