@@ -21,6 +21,8 @@ router = APIRouter(prefix="/predict", tags=["predict"])
 _BASELINE_MODEL_PATHS = {
     "intent": Path("models/baseline_intent_v1/model.joblib"),
     "urgency": Path("models/baseline_urgency_v1/model.joblib"),
+    "sentiment": Path("models/baseline_sentiment_v1/model.joblib"),
+    "emotion": Path("models/baseline_emotion_v1/model.joblib"),
 }
 
 # Winning transformer variant per task, per docs/m3-comparison-report.md's
@@ -36,6 +38,8 @@ _BASELINE_MODEL_PATHS = {
 _TRANSFORMER_MODEL_DIRS = {
     "intent": Path("models/transformer_intent_distilbert-base-uncased_v1/final"),
     "urgency": Path("models/transformer_urgency_deberta-v3-small_v1/final"),
+    "sentiment": Path("models/transformer_sentiment_distilbert-base-uncased_v1/final"),
+    "emotion": Path("models/transformer_emotion_distilbert-base-uncased_v1/final"),
 }
 
 
@@ -86,6 +90,24 @@ def predict_intent(request: PredictRequest) -> PredictResponse:
 @router.post("/urgency", response_model=PredictResponse)
 def predict_urgency(request: PredictRequest) -> PredictResponse:
     return _predict("urgency", request)
+
+
+@router.post("/sentiment", response_model=PredictResponse)
+def predict_sentiment(request: PredictRequest) -> PredictResponse:
+    """3-class: negative/neutral/positive (SPEC M5, transferred from
+    tweet_eval). Drives the per-ticket trajectory computed by
+    scripts/compute_sentiment_trajectories.py -- see
+    ml/inference/sentiment_trajectory.py for how per-message results here
+    turn into that aggregate."""
+    return _predict("sentiment", request)
+
+
+@router.post("/emotion", response_model=PredictResponse)
+def predict_emotion(request: PredictRequest) -> PredictResponse:
+    """4-class: anger/joy/optimism/sadness (SPEC M5, transferred from
+    tweet_eval). Secondary per-message signal -- not part of the sentiment
+    trajectory aggregate (see ml/inference/sentiment_trajectory.py)."""
+    return _predict("emotion", request)
 
 
 # The M4 rules-vs-model routing, computed by scripts/generate_m4_report.py

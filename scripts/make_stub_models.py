@@ -3,8 +3,10 @@ checkpoints unit tests load instead of a real trained model (CLAUDE.md:
 "tiny stub model checkpoints in tests/fixtures/models/"). stub_intent and
 stub_transformer_intent existed already, hand-made with no committed
 recipe (confirmed by git history: both were committed directly, no
-generator in either diff). This is that missing recipe, plus a new
-stub_ner fixture for M4's TokenClassificationPredictor.
+generator in either diff). This is that missing recipe, plus stub_ner for
+M4's TokenClassificationPredictor and stub_sentiment/stub_emotion (+ their
+transformer counterparts) for M5's /predict/sentiment and /predict/emotion
+routing tests.
 
 Run to regenerate all three fixtures in place:
   uv run python scripts/make_stub_models.py
@@ -27,6 +29,7 @@ import torch
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
+from sklearn.svm import LinearSVC
 from tokenizers import Tokenizer
 from tokenizers.models import WordPiece
 from tokenizers.pre_tokenizers import Whitespace
@@ -52,6 +55,24 @@ INTENT_VOCAB_WORDS = [
 NER_VOCAB_WORDS = [
     "order", "shipped", "yesterday", "charged", "for", "my", "account",
     "was", "debited", "case", "open", "since", "last", "week", "iphone",
+]  # fmt: skip
+
+SENTIMENT_LABELS = ["negative", "neutral", "positive"]
+SENTIMENT_VOCAB_WORDS = [
+    "this", "is", "great", "love", "it", "awful", "terrible", "hate",
+    "okay", "fine", "the", "product", "service", "worst", "best",
+]  # fmt: skip
+
+EMOTION_LABELS = ["anger", "joy", "optimism", "sadness"]
+EMOTION_VOCAB_WORDS = [
+    "so", "angry", "furious", "happy", "excited", "hopeful", "will",
+    "get", "better", "sad", "crying", "miss", "this", "about",
+]  # fmt: skip
+
+URGENCY_LABELS = ["low", "medium", "high"]
+URGENCY_VOCAB_WORDS = [
+    "please", "help", "urgent", "lawyer", "refund", "when", "will",
+    "this", "be", "fixed", "just", "wondering", "about", "my", "order",
 ]  # fmt: skip
 
 _SPECIAL_TOKENS = ["[PAD]", "[UNK]", "[CLS]", "[SEP]"]
@@ -166,10 +187,123 @@ def build_stub_ner(out_dir: Path) -> None:
     )
 
 
+def build_stub_sentiment(out_dir: Path) -> None:
+    """TF-IDF + LogisticRegression, 3-class -- matches what
+    ml/training/train_baseline_sentiment.py exports."""
+    texts = [
+        "this is awful", "I hate it", "terrible service", "the worst", "awful experience",
+        "it is okay", "fine I guess", "nothing special", "just okay", "an average day",
+        "I love it", "this is great", "best service ever", "so happy with this", "great product",
+    ]  # fmt: skip
+    labels = ["negative"] * 5 + ["neutral"] * 5 + ["positive"] * 5
+
+    pipeline = Pipeline(
+        [
+            ("tfidf", TfidfVectorizer()),
+            ("clf", LogisticRegression(max_iter=1000, random_state=SEED)),
+        ]
+    )
+    pipeline.fit(texts, labels)
+
+    sanity = pipeline.predict(["I love it"])[0]
+    if sanity != "positive":
+        raise RuntimeError(f"stub_sentiment sanity check failed: expected positive, got {sanity!r}")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    joblib.dump(pipeline, out_dir / "model.joblib")
+
+
+def build_stub_transformer_sentiment(out_dir: Path) -> None:
+    torch.manual_seed(SEED)
+    tokenizer = _build_tokenizer(SENTIMENT_VOCAB_WORDS)
+    id2label = dict(enumerate(SENTIMENT_LABELS))
+    config = _tiny_bert_config(vocab_size=tokenizer.vocab_size, id2label=id2label)
+    model = BertForSequenceClassification(config)
+    model.eval()
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    model.save_pretrained(out_dir)
+    tokenizer.save_pretrained(out_dir)
+    (out_dir / "label_map.json").write_text(
+        json.dumps({"labels": SENTIMENT_LABELS}, indent=2), encoding="utf-8"
+    )
+
+
+def build_stub_emotion(out_dir: Path) -> None:
+    """TF-IDF + LinearSVC, 4-class -- matches what
+    ml/training/train_baseline_emotion.py exports (LinearSVC won that
+    script's val comparison on real tweet_eval data; no predict_proba, so
+    this stub also exercises BaselinePredictor's decision_function path,
+    unlike stub_intent/stub_sentiment)."""
+    texts = [
+        "so angry right now", "this makes me furious", "I am so mad", "absolutely enraged", "angry about this",
+        "so happy today", "this is amazing news", "feeling joyful", "what a great day", "so excited",
+        "things will get better", "hopeful about tomorrow", "looking forward to this", "optimistic about it", "better days ahead",
+        "feeling so sad", "this makes me cry", "I miss this so much", "sad about the news", "crying about it",
+    ]  # fmt: skip
+    labels = ["anger"] * 5 + ["joy"] * 5 + ["optimism"] * 5 + ["sadness"] * 5
+
+    pipeline = Pipeline(
+        [
+            ("tfidf", TfidfVectorizer()),
+            ("clf", LinearSVC(random_state=SEED)),
+        ]
+    )
+    pipeline.fit(texts, labels)
+
+    sanity = pipeline.predict(["so angry right now"])[0]
+    if sanity != "anger":
+        raise RuntimeError(f"stub_emotion sanity check failed: expected anger, got {sanity!r}")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    joblib.dump(pipeline, out_dir / "model.joblib")
+
+
+def build_stub_transformer_emotion(out_dir: Path) -> None:
+    torch.manual_seed(SEED)
+    tokenizer = _build_tokenizer(EMOTION_VOCAB_WORDS)
+    id2label = dict(enumerate(EMOTION_LABELS))
+    config = _tiny_bert_config(vocab_size=tokenizer.vocab_size, id2label=id2label)
+    model = BertForSequenceClassification(config)
+    model.eval()
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    model.save_pretrained(out_dir)
+    tokenizer.save_pretrained(out_dir)
+    (out_dir / "label_map.json").write_text(
+        json.dumps({"labels": EMOTION_LABELS}, indent=2), encoding="utf-8"
+    )
+
+
+def build_stub_transformer_urgency(out_dir: Path) -> None:
+    """Low/medium/high -- ml/inference/sentiment_trajectory.py's
+    resolution-quality formula requires exactly these three labels
+    (ml/data/weak_labels.py::UrgencyLabel), unlike stub_transformer_intent's
+    unrelated 3-class label set."""
+    torch.manual_seed(SEED)
+    tokenizer = _build_tokenizer(URGENCY_VOCAB_WORDS)
+    id2label = dict(enumerate(URGENCY_LABELS))
+    config = _tiny_bert_config(vocab_size=tokenizer.vocab_size, id2label=id2label)
+    model = BertForSequenceClassification(config)
+    model.eval()
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    model.save_pretrained(out_dir)
+    tokenizer.save_pretrained(out_dir)
+    (out_dir / "label_map.json").write_text(
+        json.dumps({"labels": URGENCY_LABELS}, indent=2), encoding="utf-8"
+    )
+
+
 def build_all(fixtures_dir: Path) -> None:
     build_stub_intent(fixtures_dir / "stub_intent")
     build_stub_transformer_intent(fixtures_dir / "stub_transformer_intent")
     build_stub_ner(fixtures_dir / "stub_ner")
+    build_stub_sentiment(fixtures_dir / "stub_sentiment")
+    build_stub_transformer_sentiment(fixtures_dir / "stub_transformer_sentiment")
+    build_stub_emotion(fixtures_dir / "stub_emotion")
+    build_stub_transformer_emotion(fixtures_dir / "stub_transformer_emotion")
+    build_stub_transformer_urgency(fixtures_dir / "stub_transformer_urgency")
 
 
 def _load_json(path: Path) -> dict[str, object]:
@@ -203,16 +337,16 @@ def _check_hf_stub(name: str, committed_dir: Path, regenerated_dir: Path) -> lis
     return problems
 
 
-def _check_stub_intent(committed_dir: Path, regenerated_dir: Path) -> list[str]:
+def _check_stub_baseline(name: str, committed_dir: Path, regenerated_dir: Path) -> list[str]:
     if not (committed_dir / "model.joblib").exists():
-        return [f"stub_intent: no committed fixture at {committed_dir}"]
+        return [f"{name}: no committed fixture at {committed_dir}"]
     committed = joblib.load(committed_dir / "model.joblib")
     regenerated = joblib.load(regenerated_dir / "model.joblib")
     problems = []
     if type(committed.named_steps["clf"]) is not type(regenerated.named_steps["clf"]):
-        problems.append("stub_intent: classifier type differs")
+        problems.append(f"{name}: classifier type differs")
     if list(committed.named_steps["clf"].classes_) != list(regenerated.named_steps["clf"].classes_):
-        problems.append("stub_intent: classifier classes differ")
+        problems.append(f"{name}: classifier classes differ")
     return problems
 
 
@@ -222,13 +356,36 @@ def run_check(fixtures_dir: Path) -> bool:
         build_all(tmp_dir)
 
         problems = [
-            *_check_stub_intent(fixtures_dir / "stub_intent", tmp_dir / "stub_intent"),
+            *_check_stub_baseline(
+                "stub_intent", fixtures_dir / "stub_intent", tmp_dir / "stub_intent"
+            ),
             *_check_hf_stub(
                 "stub_transformer_intent",
                 fixtures_dir / "stub_transformer_intent",
                 tmp_dir / "stub_transformer_intent",
             ),
             *_check_hf_stub("stub_ner", fixtures_dir / "stub_ner", tmp_dir / "stub_ner"),
+            *_check_stub_baseline(
+                "stub_sentiment", fixtures_dir / "stub_sentiment", tmp_dir / "stub_sentiment"
+            ),
+            *_check_hf_stub(
+                "stub_transformer_sentiment",
+                fixtures_dir / "stub_transformer_sentiment",
+                tmp_dir / "stub_transformer_sentiment",
+            ),
+            *_check_stub_baseline(
+                "stub_emotion", fixtures_dir / "stub_emotion", tmp_dir / "stub_emotion"
+            ),
+            *_check_hf_stub(
+                "stub_transformer_emotion",
+                fixtures_dir / "stub_transformer_emotion",
+                tmp_dir / "stub_transformer_emotion",
+            ),
+            *_check_hf_stub(
+                "stub_transformer_urgency",
+                fixtures_dir / "stub_transformer_urgency",
+                tmp_dir / "stub_transformer_urgency",
+            ),
         ]
 
     if problems:
@@ -254,7 +411,11 @@ def main() -> None:
         sys.exit(0 if ok else 1)
 
     build_all(FIXTURES_DIR)
-    print(f"wrote stub_intent, stub_transformer_intent, stub_ner -> {FIXTURES_DIR}")
+    print(
+        "wrote stub_intent, stub_transformer_intent, stub_ner, stub_sentiment, "
+        "stub_transformer_sentiment, stub_emotion, stub_transformer_emotion, "
+        f"stub_transformer_urgency -> {FIXTURES_DIR}"
+    )
 
 
 if __name__ == "__main__":
