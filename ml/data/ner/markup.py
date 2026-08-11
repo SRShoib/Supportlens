@@ -10,6 +10,16 @@ Literal '\\', '[', ']', '|' in either the surrounding text or an entity's
 surface form are backslash-escaped on render() and unescaped on parse(), so:
   parse(render(text, spans)) == (text, spans)              for any valid (text, spans)
   render(*parse(markup)) == markup   for any well-formed, canonically-escaped markup
+
+Real message text can contain literal newlines (confirmed on the gold-set
+candidate pool -- clean_text() only collapses *3+* consecutive newlines, so
+a message ending "...thanks<EMOJI:x>\n\n<URL>" is already a fixed point).
+Those get escaped to the two-character sequence "\\n" too, for the same
+reason as the other special characters: scripts/ner_gold_import.py's
+per-candidate markdown entry is exactly one line, keyed off blank-line
+boundaries (ml/data/ner/gold.py's parse_gold_markdown), so an unescaped raw
+newline embedded in the text would silently split one candidate's body
+across multiple lines and corrupt the round trip.
 """
 
 import re
@@ -18,7 +28,9 @@ from collections.abc import Sequence
 from ml.data.ner.schema import CharSpan
 from ml.inference.rules_ner import ENTITY_LABELS
 
-_SPECIAL_CHARS = re.compile(r"[\\\[\]|]")
+_SPECIAL_CHARS = re.compile(r"[\\\[\]|\n\r]")
+_ESCAPE_MAP = {"\\": "\\\\", "[": "\\[", "]": "\\]", "|": "\\|", "\n": "\\n", "\r": "\\r"}
+_UNESCAPE_MAP = {"\\": "\\", "[": "[", "]": "]", "|": "|", "n": "\n", "r": "\r"}
 
 
 class MarkupError(ValueError):
@@ -27,7 +39,7 @@ class MarkupError(ValueError):
 
 
 def _escape(text: str) -> str:
-    return _SPECIAL_CHARS.sub(lambda m: "\\" + m.group(0), text)
+    return _SPECIAL_CHARS.sub(lambda m: _ESCAPE_MAP[m.group(0)], text)
 
 
 def render(text: str, spans: Sequence[CharSpan]) -> str:
@@ -66,7 +78,7 @@ def parse(markup: str) -> tuple[str, list[CharSpan]]:
         buf: list[str] = []
         while i < n and markup[i] not in stop_chars:
             if markup[i] == "\\" and i + 1 < n:
-                buf.append(markup[i + 1])
+                buf.append(_UNESCAPE_MAP.get(markup[i + 1], markup[i + 1]))
                 i += 2
             else:
                 buf.append(markup[i])

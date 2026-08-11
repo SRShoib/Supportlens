@@ -288,6 +288,44 @@ class TestImportGoldMarkdown:
         with pytest.raises(GoldImportError, match="duplicate heading"):
             import_gold_markdown(markdown, originals)
 
+    def test_candidate_text_with_embedded_newline_round_trips(self) -> None:
+        # Regression test: real Twitter messages can contain literal
+        # newlines (clean_text() only collapses runs of 3+), which broke
+        # the gold export/import round trip on the very first real
+        # `make ner-gold-export` run -- render_gold_markdown() emitted a
+        # raw newline mid-body, and parse_gold_markdown()'s line-based
+        # scanner silently truncated everything after it.
+        newline_text = "thanks for the help\n\nreally appreciated"
+        candidates = [GoldCandidate(id="nl1", text=newline_text, proposed_entities=[])]
+        selection = select_gold_candidates(candidates, random.Random(1), total=1, blind_count=0)
+
+        markdown = render_gold_markdown(selection)
+        originals = {c.id: c.text for c in selection.candidates}
+        examples = import_gold_markdown(markdown, originals)
+
+        assert len(examples) == 1
+        assert examples[0].text == newline_text
+
+    def test_blind_candidate_text_with_embedded_newline_round_trips(self) -> None:
+        # Same underlying bug, second code path: render_gold_markdown()
+        # appended blind candidates' text raw (bypassing render()'s
+        # escaping entirely) rather than through render(text, []) like
+        # every other path -- caught on the second real
+        # `make ner-gold-export` run, on a *different* candidate than the
+        # first fix, precisely because it only ever affected the blind
+        # branch.
+        newline_text = "thanks for the help\n\nreally appreciated"
+        candidates = [GoldCandidate(id="nl1", text=newline_text, proposed_entities=[])]
+        selection = select_gold_candidates(candidates, random.Random(1), total=1, blind_count=1)
+        assert selection.blind_ids == {"nl1"}  # sanity: this test exercises the blind branch
+
+        markdown = render_gold_markdown(selection)
+        originals = {c.id: c.text for c in selection.candidates}
+        examples = import_gold_markdown(markdown, originals)
+
+        assert len(examples) == 1
+        assert examples[0].text == newline_text
+
     def test_full_export_import_round_trip_passes_validate_gold_set(self) -> None:
         selection = select_gold_candidates(
             _POOL, random.Random(42), total=6, blind_count=2, target_spans_per_type=1

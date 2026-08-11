@@ -1,3 +1,4 @@
+import json
 from functools import lru_cache
 from pathlib import Path
 
@@ -87,11 +88,13 @@ def predict_urgency(request: PredictRequest) -> PredictResponse:
     return _predict("urgency", request)
 
 
-# The M4 NER token-classification export, once trained locally (SPEC M4,
-# docs/m4-how-to-run-locally.md) and dropped into models/.
-_NER_MODEL_DIRS = {
-    "entities": Path("models/transformer_entities_distilbert-base-cased_v1/final"),
-}
+# The M4 rules-vs-model routing, computed by scripts/generate_m4_report.py
+# from real gold-set eval runs (docs/m4-rules-vs-model-report.md) and
+# written here alongside the report -- not hardcoded, so a re-run after a
+# new gold set or a retrained model updates live routing with no code
+# change. On this repo's gold set, rules currently wins 4 of 5 entity
+# types; only AMOUNT routes to the model.
+_ENTITY_ROUTING_PATH = Path("models/entity_routing_v1.json")
 
 
 @lru_cache
@@ -100,27 +103,36 @@ def _get_rules_entity_predictor() -> RulesEntityPredictor:
 
 
 @lru_cache
-def _get_ner_predictor(task: str) -> EntityPredictor:
+def _get_hybrid_entity_predictor(task: str) -> EntityPredictor:
     # Imported lazily, same reason as _get_transformer_predictor above: a
     # rules-only deployment never needs transformers/torch installed.
+    from ml.inference.hybrid_ner import HybridEntityPredictor
     from ml.inference.token_classification import TokenClassificationPredictor
 
-    return TokenClassificationPredictor(_NER_MODEL_DIRS[task])
+    routing_config = json.loads(_ENTITY_ROUTING_PATH.read_text(encoding="utf-8"))
+    model_predictor = TokenClassificationPredictor(Path(routing_config["model_export_dir"]))
+    return HybridEntityPredictor(
+        _get_rules_entity_predictor(), model_predictor, routing_config["labels"]
+    )
 
 
 def _get_entity_predictor(task: str, model: str) -> EntityPredictor:
     # Unlike _get_predictor, "baseline" here (the rules extractor) has no
     # file to be missing -- RulesEntityPredictor() never raises
-    # FileNotFoundError, so model="baseline" can never 503. Only
-    # model="transformer" can, before a real export has been trained.
+    # FileNotFoundError, so model="baseline" can never 503. "transformer"
+    # actually returns the hybrid predictor (see _get_hybrid_entity_predictor):
+    # the best available combination per the real comparison, not
+    # necessarily pure model output. Can 503 if either the routing file
+    # (scripts/generate_m4_report.py hasn't run yet) or the model export
+    # it points at is missing.
     try:
         if model == "transformer":
-            return _get_ner_predictor(task)
+            return _get_hybrid_entity_predictor(task)
         return _get_rules_entity_predictor()
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=503,
-            detail=f"{model} {task} model not available; run `make train-ner` first",
+            detail=f"{model} {task} model not available; run `make eval-ner` first",
         ) from exc
 
 
@@ -153,5 +165,10 @@ def predict_entities(request: PredictRequest) -> EntitiesResponse:
     input, so the returned `start`/`end` on every span are character
     offsets into exactly the string you sent, not into some internally
     re-cleaned copy of it (the offset contract every M4 component shares --
-    see ml.inference.base.EntitySpan's docstring)."""
+    see ml.inference.base.EntitySpan's docstring).
+
+    `model="transformer"` returns the hybrid predictor's output, not pure
+    model output: each entity type routes to whichever system
+    docs/m4-rules-vs-model-report.md found actually wins it on the real
+    gold set, computed from persisted eval runs rather than assumed."""
     return _predict_entities("entities", request)
