@@ -1,6 +1,6 @@
 COMPOSE = docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: install install-training dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency ner-data ner-paraphrase
+.PHONY: install install-training dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency ner-data ner-paraphrase ner-gold-export ner-gold-import
 
 install:
 	uv sync
@@ -97,3 +97,9 @@ ner-data:
 
 ner-paraphrase:
 	uv run python -m ml.data.ner.paraphrase
+
+ner-gold-export:
+	uv run python scripts/ner_gold_export.py
+
+ner-gold-import:
+	uv run python scripts/ner_gold_import.py
