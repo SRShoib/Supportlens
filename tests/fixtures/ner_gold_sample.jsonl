@@ -1,0 +1,5 @@
+{"id": "gold:0001", "text": "order ORD-99321 shipped yesterday", "entities": [{"start": 6, "end": 15, "label": "ORDER_ID", "text": "ORD-99321"}, {"start": 24, "end": 33, "label": "DATE", "text": "yesterday"}], "source": "gold", "split": "gold", "template_id": null}
+{"id": "gold:0002", "text": "charged $49.99 for my iPhone 12 Pro Max", "entities": [{"start": 8, "end": 14, "label": "AMOUNT", "text": "$49.99"}, {"start": 22, "end": 39, "label": "PRODUCT", "text": "iPhone 12 Pro Max"}], "source": "gold", "split": "gold", "template_id": null}
+{"id": "gold:0003", "text": "account 4455-9911 was debited twice", "entities": [{"start": 8, "end": 17, "label": "ACCOUNT_REF", "text": "4455-9911"}], "source": "gold", "split": "gold", "template_id": null}
+{"id": "gold:0004", "text": "no entities in this one at all", "entities": [], "source": "gold", "split": "gold", "template_id": null}
+{"id": "gold:0005", "text": "case CASE99 open since last Tuesday", "entities": [{"start": 5, "end": 11, "label": "ACCOUNT_REF", "text": "CASE99"}, {"start": 23, "end": 35, "label": "DATE", "text": "last Tuesday"}], "source": "gold", "split": "gold", "template_id": null}
