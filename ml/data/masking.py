@@ -50,5 +50,8 @@ def mask_entities(text: str) -> str:
 
 
 def additional_special_tokens() -> list[str]:
-    """The exact special-token list M3 passes to a Hugging Face tokenizer."""
+    """The mask-token vocabulary, for callers that register these as special
+    tokens on a Hugging Face tokenizer (currently: scripts/compare_tokenization.py).
+    ml/training/train_transformer.py does NOT call this — it tokenizes masked
+    text as ordinary subwords."""
     return [token.value for token in MaskToken]
