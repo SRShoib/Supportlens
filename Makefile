@@ -1,6 +1,6 @@
 COMPOSE = docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: install install-training dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency ner-data ner-paraphrase ner-gold-export ner-gold-import train-ner
+.PHONY: install install-training dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency ner-data ner-paraphrase ner-gold-export ner-gold-import train-ner eval-ner
 
 install:
 	uv sync
@@ -106,3 +106,6 @@ ner-gold-import:
 
 train-ner:
 	uv run python ml/training/train_token_classification.py --config ml/training/configs/ner/distilbert_cased.yaml
+
+eval-ner:
+	uv run python scripts/generate_m4_report.py
