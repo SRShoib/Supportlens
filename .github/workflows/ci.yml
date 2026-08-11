@@ -34,6 +34,16 @@ jobs:
 
       - run: uv run pytest tests/unit --cov=ml.data.cleaning --cov=ml.data.masking --cov=ml.data.dedup --cov-fail-under=95
 
+      # Separate from the M1 gate above so failure attribution stays clean:
+      # a drop here points straight at M4's NER modules, not a general
+      # coverage regression.
+      - run: uv run pytest tests/unit --cov=ml.data.ner --cov=ml.inference.rules_ner --cov=ml.inference.token_classification --cov=ml.evaluation.span_metrics --cov-fail-under=90
+
+      # Confirms tests/fixtures/models/* still match what
+      # scripts/make_stub_models.py would produce -- a cheap guard against
+      # the fixtures silently drifting from their own recipe.
+      - run: uv run python scripts/make_stub_models.py --check
+
       - run: uv run pytest tests/integration -m integration
 
   docker-smoke:

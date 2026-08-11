@@ -1,0 +1,23 @@
+{
+  "scheme": "BIO",
+  "labels": [
+    "O",
+    "B-ACCOUNT_REF",
+    "I-ACCOUNT_REF",
+    "B-AMOUNT",
+    "I-AMOUNT",
+    "B-DATE",
+    "I-DATE",
+    "B-ORDER_ID",
+    "I-ORDER_ID",
+    "B-PRODUCT",
+    "I-PRODUCT"
+  ],
+  "entity_types": [
+    "ACCOUNT_REF",
+    "AMOUNT",
+    "DATE",
+    "ORDER_ID",
+    "PRODUCT"
+  ]
+}

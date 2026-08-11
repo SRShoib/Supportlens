@@ -19,6 +19,22 @@ from transformers import AutoModelForTokenClassification, AutoTokenizer
 from ml.inference.base import EntityResult, EntitySpan
 
 
+def build_label_list(entity_types: Sequence[str]) -> list[str]:
+    """BIO labels, "O" first, then B-/I- per type in a fixed (alphabetical)
+    order -- an explicit, independently-checkable label order, not left to
+    dict/set iteration order. The canonical definition of the label scheme
+    decode_spans() consumes: ml/training/train_token_classification.py uses
+    this to build training labels, and scripts/make_stub_models.py uses it
+    to build the stub_ner fixture's label_map.json, so the scheme is
+    defined in exactly one place rather than duplicated (and potentially
+    drifting) across the training script and the fixture generator."""
+    labels = ["O"]
+    for entity_type in sorted(entity_types):
+        labels.append(f"B-{entity_type}")
+        labels.append(f"I-{entity_type}")
+    return labels
+
+
 def _trim(text: str, start: int, end: int) -> tuple[int, int]:
     surface = text[start:end]
     stripped = surface.strip()

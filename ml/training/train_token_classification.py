@@ -37,7 +37,7 @@ from transformers import (
 from ml.data.ner.schema import NerExample, read_jsonl
 from ml.evaluation.span_metrics import compute_span_metrics
 from ml.inference.rules_ner import ENTITY_LABELS
-from ml.inference.token_classification import decode_spans
+from ml.inference.token_classification import build_label_list, decode_spans
 
 MODELS_DIR = Path("models")
 
@@ -69,17 +69,6 @@ class NerTrainConfig:
             if field in data:
                 data[field] = float(data[field])
         return cls(**data)
-
-
-def build_label_list(entity_types: Sequence[str]) -> list[str]:
-    """BIO labels, "O" first, then B-/I- per type in a fixed (alphabetical)
-    order -- an explicit, independently-checkable label order, not left to
-    dict/set iteration order."""
-    labels = ["O"]
-    for entity_type in sorted(entity_types):
-        labels.append(f"B-{entity_type}")
-        labels.append(f"I-{entity_type}")
-    return labels
 
 
 def align_labels(
