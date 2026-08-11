@@ -1,6 +1,6 @@
 COMPOSE = docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: install install-training dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency
+.PHONY: install install-training dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency ner-data
 
 install:
 	uv sync
@@ -91,3 +91,6 @@ train-baseline-urgency:
 
 seed-label-urgency:
 	uv run python -m ml.data.llm_seed_labels
+
+ner-data:
+	uv run python -m ml.data.ner.generate
