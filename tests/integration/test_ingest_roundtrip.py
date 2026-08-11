@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from api.db import session as session_module
-from api.db.models import Message, Ticket
+from api.db.models import Message, Prediction, Ticket
 from api.db.session import make_engine
 from api.main import app
 from fastapi.testclient import TestClient
@@ -120,4 +120,75 @@ def test_api_get_single_ticket_returns_messages(
 
 def test_api_get_unknown_ticket_returns_404(api_client: TestClient) -> None:
     response = api_client.get("/tickets/00000000-0000-0000-0000-000000000000")
+    assert response.status_code == 404
+
+
+def test_api_lists_ticket_predictions_filtered_by_task(
+    db_session: Session, api_client: TestClient
+) -> None:
+    persist_tickets(db_session, bitext.iter_tickets(rows=_bitext_rows()[:1]))
+    ticket = db_session.query(Ticket).one()
+    db_session.add_all(
+        [
+            Prediction(
+                ticket_id=ticket.id,
+                task="sentiment_trajectory",
+                label="positive",
+                score=0.5,
+                payload={"sequence": ["negative", "positive"]},
+                model_version="transformer_sentiment_distilbert-base-uncased_v1",
+            ),
+            Prediction(
+                ticket_id=ticket.id,
+                task="some_other_task",
+                model_version="v1",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = api_client.get(
+        f"/tickets/{ticket.id}/predictions", params={"task": "sentiment_trajectory"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["task"] == "sentiment_trajectory"
+    assert body[0]["payload"]["sequence"] == ["negative", "positive"]
+
+
+def test_api_lists_all_ticket_predictions_when_task_not_specified(
+    db_session: Session, api_client: TestClient
+) -> None:
+    persist_tickets(db_session, bitext.iter_tickets(rows=_bitext_rows()[:1]))
+    ticket = db_session.query(Ticket).one()
+    db_session.add_all(
+        [
+            Prediction(ticket_id=ticket.id, task="sentiment_trajectory", model_version="v1"),
+            Prediction(ticket_id=ticket.id, task="some_other_task", model_version="v1"),
+        ]
+    )
+    db_session.commit()
+
+    response = api_client.get(f"/tickets/{ticket.id}/predictions")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+
+
+def test_api_ticket_predictions_empty_list_when_none_persisted_yet(
+    db_session: Session, api_client: TestClient
+) -> None:
+    persist_tickets(db_session, bitext.iter_tickets(rows=_bitext_rows()[:1]))
+    ticket = db_session.query(Ticket).one()
+
+    response = api_client.get(f"/tickets/{ticket.id}/predictions")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_api_ticket_predictions_404_for_unknown_ticket(api_client: TestClient) -> None:
+    response = api_client.get("/tickets/00000000-0000-0000-0000-000000000000/predictions")
     assert response.status_code == 404
