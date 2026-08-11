@@ -109,6 +109,63 @@ export interface EntityResult {
   truncated: boolean;
 }
 
+// Mirrors ml/inference/sentiment_trajectory.py::Trajectory.to_payload() --
+// the exact JSONB shape scripts/compute_sentiment_trajectories.py writes
+// into Prediction.payload for task="sentiment_trajectory".
+export interface SentimentTrajectoryPayload {
+  sequence: string[];
+  scores: number[];
+  final_customer_label: string;
+  resolution_quality: number;
+  urgency_label: string;
+  urgency_score: number;
+  urgency_model_version: string;
+}
+
+export interface Prediction {
+  id: string;
+  ticket_id: string | null;
+  message_id: string | null;
+  task: string;
+  label: string | null;
+  score: number | null;
+  payload: Record<string, unknown>;
+  model_version: string;
+  eval_run_id: string | null;
+  created_at: string;
+}
+
+// GET /tickets/{id}/predictions reads durably-stored Predictions (SPEC M5) --
+// unlike predictEntities above, this never recomputes live. Returns [] (not
+// an error) for a ticket that exists but has no predictions yet, e.g.
+// scripts/compute_sentiment_trajectories.py hasn't run against this ticket.
+export async function getTicketPredictions(
+  ticketId: string,
+  task?: string,
+): Promise<Prediction[]> {
+  const search = new URLSearchParams();
+  if (task) search.set("task", task);
+  const query = search.toString();
+  try {
+    return await apiFetch<Prediction[]>(
+      `/tickets/${ticketId}/predictions${query ? `?${query}` : ""}`,
+    );
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+export async function getSentimentTrajectory(
+  ticketId: string,
+): Promise<SentimentTrajectoryPayload | null> {
+  const predictions = await getTicketPredictions(ticketId, "sentiment_trajectory");
+  const payload = predictions[0]?.payload;
+  return (payload as unknown as SentimentTrajectoryPayload | undefined) ?? null;
+}
+
 // POST /predict/entities caps a single request at 100 texts
 // (apps/api/schemas/predict.py's PredictRequest), so a ticket with an
 // unusually long message history is chunked rather than truncated.
