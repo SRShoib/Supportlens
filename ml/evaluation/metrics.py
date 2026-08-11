@@ -1,10 +1,20 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
 from api.db.models import EvalRun
 from sklearn.metrics import classification_report, confusion_matrix, f1_score
 from sqlalchemy.orm import Session
+
+
+class EvalMetrics(Protocol):
+    """Whatever a task's metrics dataclass looks like, persist_eval_run only
+    needs it to render as a JSONB-safe dict. Lets M4's span metrics
+    (ml/evaluation/span_metrics.py) persist through the same function as
+    classification metrics without reshaping either into the other's
+    columns."""
+
+    def to_metrics_dict(self) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True)
@@ -13,6 +23,14 @@ class ClassificationMetrics:
     per_class_f1: dict[str, float]
     confusion_matrix: list[list[int]]
     labels: list[str]
+
+    def to_metrics_dict(self) -> dict[str, Any]:
+        return {
+            "macro_f1": self.macro_f1,
+            "per_class_f1": self.per_class_f1,
+            "confusion_matrix": self.confusion_matrix,
+            "labels": self.labels,
+        }
 
 
 def compute_classification_metrics(
@@ -37,7 +55,7 @@ def persist_eval_run(
     model_version: str,
     dataset: str,
     split: str,
-    metrics: ClassificationMetrics,
+    metrics: EvalMetrics,
     params: dict[str, Any],
 ) -> EvalRun:
     """The single source of truth for every number in the README/dashboard
@@ -47,12 +65,7 @@ def persist_eval_run(
         model_version=model_version,
         dataset=dataset,
         split=split,
-        metrics={
-            "macro_f1": metrics.macro_f1,
-            "per_class_f1": metrics.per_class_f1,
-            "confusion_matrix": metrics.confusion_matrix,
-            "labels": metrics.labels,
-        },
+        metrics=metrics.to_metrics_dict(),
         params=params,
         status="completed",
         finished_at=datetime.now(UTC),
