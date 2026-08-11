@@ -56,6 +56,22 @@ training = [
     "tiktoken>=0.8",
     "protobuf>=5.0",
 ]
+# CPU inference deps for M3's transformer serving path (apps/api loads real
+# fine-tuned exports, SPEC §5: "serving is CPU-only"). Separate from
+# `training`: this is real API runtime code, not GPU-only tooling, so it's
+# synced into the API Docker image (infra/api.Dockerfile) and into CI — but
+# still excluded from default-groups so a plain `uv sync` for data/API work
+# unrelated to transformers stays lean. Unlike `training`, torch IS pinned
+# here directly: `transformers` doesn't pull it in on its own (torch is an
+# optional backend, not a hard dependency), and there's no CUDA-driver-match
+# constraint for CPU-only serving in Docker/CI the way there is for local GPU
+# training — a normal lockfile-pinned resolution is fine.
+serving = [
+    "transformers>=4.46,<5.0",
+    "torch>=2.2",
+    "sentencepiece>=0.2",
+    "protobuf>=5.0",
+]
 
 [tool.uv]
 default-groups = ["ml", "dev"]

@@ -1,6 +1,6 @@
 COMPOSE = docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: install install-training dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency
+.PHONY: install install-training dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency
 
 install:
 	uv sync
@@ -73,6 +73,9 @@ seed:
 
 eval:
 	uv run python scripts/generate_baseline_report.py
+
+eval-transformers:
+	uv run python scripts/generate_m3_report.py
 
 tokenization-doc:
 	uv run python scripts/compare_tokenization.py
