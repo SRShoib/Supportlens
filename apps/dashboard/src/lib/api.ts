@@ -51,11 +51,12 @@ export class ApiError extends Error {
   }
 }
 
-async function apiFetch<T>(path: string): Promise<T> {
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBaseUrl()}${path}`, {
     // The dashboard shows live ticket state -- never serve a stale cached
     // response for what is, functionally, a database read.
     cache: "no-store",
+    ...init,
   });
   if (!response.ok) {
     throw new ApiError(
@@ -90,4 +91,46 @@ export async function getTicket(id: string): Promise<Ticket | null> {
     }
     throw error;
   }
+}
+
+// Mirrors apps/api/schemas/predict.py's EntitySpanOut/EntityResultOut.
+// `start`/`end` are character offsets into exactly the string that was
+// sent -- never re-clean text_clean before slicing it with these.
+export interface EntitySpan {
+  start: number;
+  end: number;
+  label: string;
+  text: string;
+  score: number;
+}
+
+export interface EntityResult {
+  entities: EntitySpan[];
+  truncated: boolean;
+}
+
+// POST /predict/entities caps a single request at 100 texts
+// (apps/api/schemas/predict.py's PredictRequest), so a ticket with an
+// unusually long message history is chunked rather than truncated.
+const ENTITY_PREDICT_BATCH_SIZE = 100;
+
+// `model: "transformer"` returns the hybrid rules+model predictor's output
+// (ml/inference/hybrid_ner.py): each entity type routed to whichever system
+// docs/m4-rules-vs-model-report.md found actually wins it on the gold set,
+// not pure model output.
+export async function predictEntities(texts: string[]): Promise<EntityResult[]> {
+  if (texts.length === 0) {
+    return [];
+  }
+  const results: EntityResult[] = [];
+  for (let offset = 0; offset < texts.length; offset += ENTITY_PREDICT_BATCH_SIZE) {
+    const chunk = texts.slice(offset, offset + ENTITY_PREDICT_BATCH_SIZE);
+    const response = await apiFetch<{ results: EntityResult[] }>("/predict/entities", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ texts: chunk, model: "transformer" }),
+    });
+    results.push(...response.results);
+  }
+  return results;
 }
