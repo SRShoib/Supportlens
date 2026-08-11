@@ -84,12 +84,23 @@ def sentence_splice(
     zero-entity shell, e.g. "Thanks for the help. <clause>. Really
     appreciated." Returns None if the shell has no sentence boundary to
     splice at -- caller falls back to wrap()."""
-    boundaries = [m.start() for m in _SENTENCE_BOUNDARY_RE.finditer(shell)]
+    boundaries = list(_SENTENCE_BOUNDARY_RE.finditer(shell))
     if not boundaries:
         return None
-    at = rng.choice(boundaries)
-    text = f"{shell[:at]}{rendered_text}. {shell[at:]}"
-    shifted = [CharSpan(s.start + at, s.end + at, s.label, s.text) for s in rendered_spans]
+    match = rng.choice(boundaries)
+    # match.start() is where the *whitespace* after the sentence-ending
+    # punctuation begins (a zero-width lookbehind precedes it), and
+    # match.end() is where that whitespace run ends. Splicing naively at
+    # match.start() drops the space before the inserted clause (shell ends
+    # "help." with nothing after) and re-adds the shell's own original
+    # whitespace after "shell[at:]", doubling up with the ". " this
+    # function already inserts. Dropping the matched whitespace entirely
+    # and replacing it with exactly one controlled space on each side
+    # keeps the result single-spaced regardless of what the shell had.
+    start, end = match.start(), match.end()
+    text = f"{shell[:start]} {rendered_text}. {shell[end:]}"
+    offset = start + 1
+    shifted = [CharSpan(s.start + offset, s.end + offset, s.label, s.text) for s in rendered_spans]
     return text, shifted
 
 
