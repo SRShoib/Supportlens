@@ -124,6 +124,38 @@ class TestSentenceSplice:
         )
         assert result is None
 
+    def test_result_is_a_clean_text_fixed_point(self) -> None:
+        # Regression test: the naive version spliced at match.start() --
+        # the position where the boundary's whitespace *begins* -- which
+        # dropped the space before the inserted clause (shell ended
+        # "help." directly against the clause with no gap) and then
+        # doubled it after, since the shell's own original whitespace
+        # (untouched, from match.start() onward) was concatenated right
+        # after this function's own literal ". ". Both defects made the
+        # result fail the clean_text fixed-point invariant every M4
+        # component depends on.
+        shell = "Thanks for the help. Really appreciated it a lot."
+        rendered_text = "charged $40 today"
+        rendered_spans = [CharSpan(8, 11, "AMOUNT", "$40")]
+        rng = random.Random(0)
+
+        result = sentence_splice(shell, rendered_text, rendered_spans, rng)
+
+        assert result is not None
+        text, spans = result
+        assert is_fixed_point(text)
+        assert ".charged" not in text
+        assert ".  " not in text
+        assert text[spans[0].start : spans[0].end] == spans[0].text
+
+    def test_exactly_one_space_before_and_after_the_inserted_clause(self) -> None:
+        shell = "Hello there. Goodbye now."
+        rng = random.Random(1)
+        result = sentence_splice(shell, "clause", [], rng)
+        assert result is not None
+        text, _ = result
+        assert " clause. " in text
+
 
 class TestSlotSubstitute:
     def test_replaces_target_span_and_offsets_correctly(self) -> None:
