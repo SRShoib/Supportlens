@@ -60,6 +60,30 @@ services:
       start_period: 10s
     networks: [supportlens]
 
+  dashboard:
+    build:
+      context: ../apps/dashboard
+      dockerfile: ../../infra/dashboard.Dockerfile
+    environment:
+      # Docker's internal service DNS -- the dashboard's Server Components
+      # fetch apps/api directly over the compose network, never through the
+      # browser, so there's no CORS surface to configure on the API side.
+      API_BASE_URL: http://api:8000
+    ports:
+      - "${DASHBOARD_PORT}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # No curl/wget baseline on node:alpine's minimal image -- Node itself
+      # does the check, same pattern as chroma/api's inline Python probes.
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/tickets', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks: [supportlens]
+
 networks:
   supportlens:
 
