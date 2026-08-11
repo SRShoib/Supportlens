@@ -1,8 +1,21 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { getTicket } from "@/lib/api";
+import { EntityHighlightedText } from "@/components/entity-highlighted-text";
+import { type EntityResult, getTicket, predictEntities } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
+
+// Best-effort: the routing file or model export may not have been generated
+// yet (`make eval-ner`), and a ticket page is a read of already-ingested
+// data -- it shouldn't 500 just because entity extraction is unavailable.
+// Falling back to plain message text degrades gracefully instead.
+async function getMessageEntities(texts: string[]): Promise<EntityResult[] | null> {
+  try {
+    return await predictEntities(texts);
+  } catch {
+    return null;
+  }
+}
 
 export default async function TicketDetailPage({ params }: PageProps<"/tickets/[id]">) {
   const { id } = await params;
@@ -10,6 +23,8 @@ export default async function TicketDetailPage({ params }: PageProps<"/tickets/[
   if (!ticket) {
     notFound();
   }
+
+  const entityResults = await getMessageEntities(ticket.messages.map((message) => message.text_clean));
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-10">
@@ -29,7 +44,7 @@ export default async function TicketDetailPage({ params }: PageProps<"/tickets/[
       </header>
 
       <ol className="mt-8 space-y-4">
-        {ticket.messages.map((message) => (
+        {ticket.messages.map((message, index) => (
           <li
             key={message.id}
             className={`rounded-lg border p-4 ${
@@ -43,7 +58,14 @@ export default async function TicketDetailPage({ params }: PageProps<"/tickets/[
               {message.sent_at && <span>{formatDateTime(message.sent_at)}</span>}
             </div>
             <p className="mt-2 text-sm whitespace-pre-wrap text-zinc-800 dark:text-zinc-100">
-              {message.text_clean}
+              {entityResults?.[index] ? (
+                <EntityHighlightedText
+                  text={message.text_clean}
+                  entities={entityResults[index].entities}
+                />
+              ) : (
+                message.text_clean
+              )}
             </p>
           </li>
         ))}
