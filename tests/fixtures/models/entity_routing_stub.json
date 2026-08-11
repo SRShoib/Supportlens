@@ -1,0 +1,11 @@
+{
+  "labels": {
+    "ORDER_ID": "rules",
+    "PRODUCT": "rules",
+    "DATE": "model",
+    "AMOUNT": "model",
+    "ACCOUNT_REF": "rules"
+  },
+  "model_version": "stub_ner",
+  "model_export_dir": "tests/fixtures/models/stub_ner"
+}

@@ -33,6 +33,7 @@ REPORT_PATH = ROOT / "docs" / "m4-rules-vs-model-report.md"
 SYNTH_PATH = ROOT / "data" / "splits" / "ner_v1.jsonl"
 GOLD_PATH = ROOT / "data" / "gold" / "ner_gold_v1.jsonl"
 GOLD_META_PATH = ROOT / "data" / "gold" / "ner_gold_v1.meta.json"
+ENTITY_ROUTING_PATH = ROOT / "models" / "entity_routing_v1.json"
 
 BENCHMARK_TEXT = "order ORD-99321 shipped yesterday, charged $49.99 for my iPhone 12 Pro Max"
 PREDICT_BATCH_SIZE = 64
@@ -147,6 +148,28 @@ def _blind_omission_examples(
             spans = [CharSpan(s.start, s.end, s.label, s.text) for s in result.entities]
             omissions.append((ex, spans))
     return omissions
+
+
+def _write_entity_routing(routing: dict[str, str], best_model_name: str) -> None:
+    """ml/inference/hybrid_ner.py's HybridEntityPredictor reads this at
+    serve time -- the routing decision lives here, computed from this run's
+    real eval numbers, rather than hardcoded in the predictor itself.
+    "tie (within noise)" normalizes to "rules": the cheaper, always
+    -available system, not a coin flip."""
+    normalized = {label: ("model" if rec == "model" else "rules") for label, rec in routing.items()}
+    model_version = f"transformer_entities_{best_model_name}_v1"
+    ENTITY_ROUTING_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ENTITY_ROUTING_PATH.write_text(
+        json.dumps(
+            {
+                "labels": normalized,
+                "model_version": model_version,
+                "model_export_dir": f"models/{model_version}/final",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
 
 def _load_gold_blind_split(
@@ -443,6 +466,8 @@ def main() -> None:
     fps, fns = span_errors(gold_gold_spans, best_pred_spans, gold_texts)  # type: ignore[arg-type]
 
     routing_lines, routing = _recommend_routing(rules_gold, best_model_gold)
+    _write_entity_routing(routing, best_model_name)
+    print(f"wrote {ENTITY_ROUTING_PATH}")
 
     print("rendering report...")
     lines = [
