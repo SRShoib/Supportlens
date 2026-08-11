@@ -79,25 +79,32 @@ path runs regardless of the fast/slow tokenizer flag.
 **Decision:** `pyproject.toml` gets a `serving` group (`transformers<5.0`, `torch>=2.2`, `sentencepiece`,
 `protobuf`) — excluded from `default-groups` like `training`, but synced explicitly in
 `infra/api.Dockerfile` (both build stages) and in CI (`uv sync --frozen --group serving`). Unlike
-`training`, torch **is** pinned directly here.
+`training`, torch **is** pinned directly here, and is pinned to the CPU-only wheel via a dedicated,
+`explicit = true` `[[tool.uv.index]]` entry (`pytorch-cpu`, `download.pytorch.org/whl/cpu`) scoped to
+`torch` only through `[tool.uv.sources]`.
 **Why:** M3's accept criterion is a real API flag that serves live transformer inference (SPEC: "API flag
 switches baseline/transformer per request"), not just an export step — so `ml/inference/transformer.py`
-needs `transformers`+`torch` at API runtime, in Docker and in CI, not just on the training machine. This is
-CPU-only inference of an already-exported model, not a GPU dependency, so it doesn't conflict with CLAUDE.md's
-"never add GPU deps to the API image" rule — that rule is about CUDA/training deps specifically. Pinning
-torch normally is safe here because there's no CUDA-driver-match constraint for CPU serving in an isolated
-Docker/CI environment, unlike local GPU training.
-**How to apply:** never run `uv sync --group serving` on the same local venv used for GPU training — it
-would pull a default (CPU) torch resolution and silently replace the manually-installed CUDA build documented
-above. Locally, the already-installed `training` group (torch + transformers) is a superset that covers the
-same import surface for testing `ml/inference/transformer.py`, so `serving` never needs to be synced outside
-Docker/CI. Image size grows accordingly (torch CPU + transformers ~1-2GB on top of the sklearn-only baseline
-image); trimming it via a CPU-specific torch index or ONNX quantization is a documented future optimization
-(SPEC M3 explicitly frames ONNX quantization as optional), not required for M3's accept criteria.
-**Alternatives:** bake a slimmer CPU-only torch wheel via a dedicated PyPI index — rejected for now to avoid
-the added complexity of per-group index scoping in `[tool.uv.sources]` risking an accidental clobber of the
-training group's manual CUDA install; ONNX-export the transformer models instead of serving raw
-safetensors — deferred, real optimization work beyond what M3 requires.
+needs `transformers`+`torch` at API runtime, in Docker and in CI, not just on the training machine. **The
+CPU-index pin was added after the fact, correcting this entry's original assumption that "a normal
+lockfile-pinned resolution is fine" for CPU serving.** It isn't: a plain `torch>=2.2` resolution on Linux
+pulls the CUDA build transitively (11 `nvidia-cu13` packages + `cuda-toolkit` + `triton`, ~2.5GB), which is
+dead weight in a container with no GPU and directly violates CLAUDE.md's "never add GPU deps to the API
+image" rule. This is also what caused two real local disk-space crashes (C: hit 0 bytes free, twice) during
+the API image build — not a hypothetical concern. Pinning the CPU wheel drops the `serving` group's download
+from ~2.6GB to ~200MB (torch alone: 502MB CUDA build → 183MB CPU-only wheel) with identical inference
+correctness.
+**How to apply:** never run `uv sync --group serving` (or anything that touches the `torch` pin) in the main
+local dev venv used for GPU training — it silently replaces the manually-installed CUDA build documented
+below with the CPU-only one (confirmed by hitting this exact trap while making this fix: `uv sync --group
+serving` swapped `torch==2.6.0+cu124` for `2.13.0+cpu` locally; recovered via `uv pip install --reinstall
+torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124`). Locally, the already-installed `training`
+group (torch + transformers) is a superset that covers the same import surface for testing
+`ml/inference/transformer.py`, so `serving` never needs to be synced outside Docker/CI — full stop, not just
+"in principle."
+**Alternatives:** leave the plain PyPI resolution as originally decided — rejected once it was shown to
+silently resolve to the CUDA build and to be the actual root cause of the disk crashes, not just a
+theoretical inefficiency; ONNX-export the transformer models instead of serving raw safetensors — still
+deferred, real optimization work beyond what M3 requires.
 
 ## 2026-08-10 — CUDA torch install (RTX 4060 Ti, driver 591.86)
 
