@@ -9,6 +9,7 @@ produces comparable numbers for the M3 comparison report.
 import time
 from dataclasses import dataclass
 from statistics import mean, median
+from typing import Any
 
 from ml.inference.base import Predictor
 
@@ -23,7 +24,7 @@ class LatencyResult:
 
 
 def benchmark_latency(
-    predictor: Predictor, text: str, *, warmup: int = 3, runs: int = 20
+    predictor: Predictor[Any], text: str, *, warmup: int = 3, runs: int = 20
 ) -> LatencyResult:
     """Single-text predict() calls, timed one at a time (SPEC's budget is
     per-request, not batch throughput). warmup discards first-call overhead
