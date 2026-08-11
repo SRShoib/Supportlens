@@ -3,9 +3,17 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-from api.schemas.predict import PredictRequest, PredictResponse, TaskResultOut
-from ml.inference.base import Predictor
+from api.schemas.predict import (
+    EntitiesResponse,
+    EntityResultOut,
+    EntitySpanOut,
+    PredictRequest,
+    PredictResponse,
+    TaskResultOut,
+)
+from ml.inference.base import EntityPredictor, Predictor
 from ml.inference.baseline import BaselinePredictor
+from ml.inference.rules_ner import RulesEntityPredictor
 
 router = APIRouter(prefix="/predict", tags=["predict"])
 
@@ -77,3 +85,73 @@ def predict_intent(request: PredictRequest) -> PredictResponse:
 @router.post("/urgency", response_model=PredictResponse)
 def predict_urgency(request: PredictRequest) -> PredictResponse:
     return _predict("urgency", request)
+
+
+# The M4 NER token-classification export, once trained locally (SPEC M4,
+# docs/m4-how-to-run-locally.md) and dropped into models/.
+_NER_MODEL_DIRS = {
+    "entities": Path("models/transformer_entities_distilbert-base-cased_v1/final"),
+}
+
+
+@lru_cache
+def _get_rules_entity_predictor() -> RulesEntityPredictor:
+    return RulesEntityPredictor()
+
+
+@lru_cache
+def _get_ner_predictor(task: str) -> EntityPredictor:
+    # Imported lazily, same reason as _get_transformer_predictor above: a
+    # rules-only deployment never needs transformers/torch installed.
+    from ml.inference.token_classification import TokenClassificationPredictor
+
+    return TokenClassificationPredictor(_NER_MODEL_DIRS[task])
+
+
+def _get_entity_predictor(task: str, model: str) -> EntityPredictor:
+    # Unlike _get_predictor, "baseline" here (the rules extractor) has no
+    # file to be missing -- RulesEntityPredictor() never raises
+    # FileNotFoundError, so model="baseline" can never 503. Only
+    # model="transformer" can, before a real export has been trained.
+    try:
+        if model == "transformer":
+            return _get_ner_predictor(task)
+        return _get_rules_entity_predictor()
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"{model} {task} model not available; run `make train-ner` first",
+        ) from exc
+
+
+def _predict_entities(task: str, request: PredictRequest) -> EntitiesResponse:
+    predictor = _get_entity_predictor(task, request.model)
+    results = predictor.predict(request.texts)
+    return EntitiesResponse(
+        results=[
+            EntityResultOut(
+                entities=[
+                    EntitySpanOut(
+                        start=span.start,
+                        end=span.end,
+                        label=span.label,
+                        text=span.text,
+                        score=span.score,
+                    )
+                    for span in result.entities
+                ],
+                truncated=result.truncated,
+            )
+            for result in results
+        ]
+    )
+
+
+@router.post("/entities", response_model=EntitiesResponse)
+def predict_entities(request: PredictRequest) -> EntitiesResponse:
+    """Pass `text_clean`, not raw text: this endpoint never cleans its
+    input, so the returned `start`/`end` on every span are character
+    offsets into exactly the string you sent, not into some internally
+    re-cleaned copy of it (the offset contract every M4 component shares --
+    see ml.inference.base.EntitySpan's docstring)."""
+    return _predict_entities("entities", request)
