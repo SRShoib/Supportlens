@@ -136,3 +136,47 @@ CPU-only build on everyone (breaking GPU training) or force a specific CUDA vers
 whoever's driver is running it.
 **How to apply:** documented in full in `docs/m3-how-to-run-locally.md`; this entry exists so the "why not
 just pin it" question has a permanent answer.
+
+## 2026-08-12 — M5's tweet_eval splits are used verbatim, not re-split with seed 42
+
+**Decision:** `ml/training/tweet_eval_data.py` writes tweet_eval's own `train`/`validation`/`test` partition
+straight to `data/splits/{sentiment,emotion}_v1.parquet` (renaming `validation` to `val`), instead of pooling
+all rows and re-splitting 70/15/15 the way `ml/training/splits.py::_stratified_split` does for M2's
+Postgres-sourced data.
+**Why:** tweet_eval already ships a fixed, canonical split for its own benchmark — re-splitting it would be
+reinventing the benchmark, not reproducing it, and would make this repo's numbers non-comparable to published
+tweet_eval results. CLAUDE.md's "seeds fixed (42) for every split" rule is about splits *we* generate from
+scratch; it doesn't apply here because no random partitioning happens at all.
+**Alternatives:** pool train+validation+test and re-split 70/15/15 like M2 — rejected, loses comparability to
+the standard benchmark for no benefit (the fixed split is already stratified and appropriately sized).
+
+## 2026-08-12 — Resolution-quality formula and "final message" / "ticket urgency" definitions (M5)
+
+**Decision:** SPEC M5 specifies the heuristic only as "final-message sentiment x urgency," leaving both terms
+undefined. This repo defines: **final message** = the ticket's last *customer* message (not the literal last
+message, which could be the agent's closing reply); **ticket urgency** = the urgency prediction on the
+ticket's *first* customer message (the same per-message unit `ml/training/splits.py::build_urgency_splits`
+trained on). Formula: `resolution_quality = signed_sentiment(final_customer_message) *
+URGENCY_WEIGHT[ticket_urgency]`, where `signed_sentiment` is `+score` (positive), `-score` (negative), or
+`0.0` (neutral), and `URGENCY_WEIGHT = {"low": 1.0, "medium": 0.66, "high": 0.33}` — see
+`ml/inference/sentiment_trajectory.py`.
+**Why:** a ticket that opened urgent and ends on a negative note should score worse than one that opened
+calm and ends negative; weighting by *opening* urgency (not urgency re-evaluated at the end) captures "how
+much this mattered" rather than re-measuring the same negative-ending signal twice. Using the customer's last
+word (not the agent's) keeps the metric about customer state, matching the trajectory's own framing.
+**Alternatives:** literal last message regardless of author — rejected, would score an agent's positive
+closing note as ticket resolution quality even when the customer never responded to it; re-evaluating urgency
+on the final message instead of the opening one — rejected, would largely just re-derive the sentiment signal
+under a different name rather than adding independent information.
+
+## 2026-08-12 — Sentiment trajectory Predictions are full-recompute, not incrementally upserted
+
+**Decision:** `scripts/compute_sentiment_trajectories.py` deletes every existing
+`task="sentiment_trajectory"` `Prediction` row before reinserting, in the same transaction as the inserts.
+**Why:** M2-M4's `/predict/*` endpoints never persist anything (always live, stateless) — M5 is the first
+module writing durable `Prediction` rows, and `Prediction.id` is a random UUID (`default=uuid.uuid4`), not a
+deterministic hash like `Ticket`/`Message`'s ids. Re-running the script without clearing old rows first would
+just accumulate duplicates rather than being a safe no-op the way M1's ingestion loaders are.
+**Alternatives:** upsert on `(ticket_id, task)` — would need a new unique constraint `Prediction` doesn't
+have today (unlike `LLMCall`'s `(purpose, model, prompt_hash)` cache key) and adds schema surface for a
+script that's expected to run as an occasional full backfill, not a high-frequency incremental job.
