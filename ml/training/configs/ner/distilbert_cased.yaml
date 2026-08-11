@@ -1,0 +1,10 @@
+model_name: distilbert-base-cased
+task: entities
+num_epochs: 4
+batch_size: 16
+eval_batch_size: 32
+learning_rate: 3.0e-5
+max_seq_length: 192
+warmup_ratio: 0.1
+weight_decay: 0.01
+include_paraphrases: false

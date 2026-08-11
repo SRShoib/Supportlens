@@ -106,6 +106,24 @@ silently resolve to the CUDA build and to be the actual root cause of the disk c
 theoretical inefficiency; ONNX-export the transformer models instead of serving raw safetensors — still
 deferred, real optimization work beyond what M3 requires.
 
+## 2026-08-11 — the CPU-torch swap trap also fires on `--group training`, not just `--group serving`
+
+**Finding:** the entry above's "how to apply" says the danger is `uv sync --group serving`. It isn't only
+that — `uv sync --group training` hits the identical trap, confirmed by hitting it while preparing M4's CPU
+smoke test: `accelerate` (a `training`-group dependency) requires `torch` without a version/build
+constraint, and `[tool.uv.sources]`'s `torch = [{ index = "pytorch-cpu" }]` pin is **project-scoped, not
+group-scoped** — it applies to *any* resolution of `torch`, regardless of which group's sync triggered it.
+Running `uv sync --group training` here silently swapped `torch==2.6.0+cu124` for `2.13.0+cpu` again,
+exactly like the `serving` case; recovered with the same command (`uv pip install --reinstall torch==2.6.0
+--index-url https://download.pytorch.org/whl/cu124`), then re-verified `torch.cuda.is_available() is True`.
+**Why this matters:** the previous entry's "training is a superset, so serving never needs to be synced
+outside Docker/CI" is still true for *avoiding a second sync*, but it understates the risk: a `uv sync
+--group training` that needs to touch the lockfile at all (a fresh checkout, a dependency bump, anything
+that isn't a no-op) can just as easily strip the CUDA build.
+**How to apply:** after *any* `uv sync` on a GPU training box — not just one naming `serving` — verify
+`uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available())"` still reports the
+CUDA build before starting a real training run. If it doesn't, rerun the CUDA reinstall command above.
+
 ## 2026-08-10 — CUDA torch install (RTX 4060 Ti, driver 591.86)
 
 **Decision:** torch is never a pinned dependency in `pyproject.toml` (any group). `make install-training`
