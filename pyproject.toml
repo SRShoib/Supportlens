@@ -63,9 +63,10 @@ training = [
 # still excluded from default-groups so a plain `uv sync` for data/API work
 # unrelated to transformers stays lean. Unlike `training`, torch IS pinned
 # here directly: `transformers` doesn't pull it in on its own (torch is an
-# optional backend, not a hard dependency), and there's no CUDA-driver-match
-# constraint for CPU-only serving in Docker/CI the way there is for local GPU
-# training — a normal lockfile-pinned resolution is fine.
+# optional backend, not a hard dependency). A plain PyPI resolution of
+# `torch` on Linux pulls the CUDA build (~2.5GB of nvidia-cu13/triton deps
+# it can never use, no GPU in the container) — see the `pytorch-cpu` index
+# below, which pins torch to the real CPU-only wheel instead.
 serving = [
     "transformers>=4.46,<5.0",
     "torch>=2.2",
@@ -78,6 +79,12 @@ default-groups = ["ml", "dev"]
 
 [tool.uv.sources]
 en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [build-system]
 requires = ["hatchling"]
