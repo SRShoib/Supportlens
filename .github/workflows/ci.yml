@@ -57,5 +57,7 @@ jobs:
 
       - run: curl --fail http://localhost:8000/healthz
 
+      - run: curl --fail http://localhost:3000/tickets
+
       - if: always()
         run: docker compose --env-file .env -f infra/docker-compose.yml down -v
