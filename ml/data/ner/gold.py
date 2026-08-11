@@ -208,7 +208,13 @@ def render_gold_markdown(
         tag = "  [blind]" if candidate.id in selection.blind_ids else ""
         lines.append(f"## msg:{candidate.id}{tag}")
         if candidate.id in selection.blind_ids:
-            lines.append(candidate.text)
+            # No suggestions shown, but still routed through render() (with
+            # no spans, so no brackets appear) rather than appended raw --
+            # otherwise an embedded newline in the message text (real
+            # Twitter messages can have them) bypasses the escaping every
+            # other path relies on and silently splits this entry across
+            # multiple markdown lines.
+            lines.append(render(candidate.text, []))
         else:
             lines.append(render(candidate.text, candidate.proposed_entities))
         lines.append("")
