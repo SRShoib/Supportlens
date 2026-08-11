@@ -30,8 +30,8 @@ This is the direct analogue of M2's Bitext-vs-real-tweets finding: synthetic-dat
 | Model | p50 ms | p95 ms | Size |
 |---|---|---|---|
 | rules | 0.1 | 0.1 | n/a (no file) |
-| bert-base-cased | 32.3 | 35.7 | 411.8 MB |
-| distilbert-base-cased | 16.3 | 17.4 | 249.6 MB |
+| bert-base-cased | 37.2 | 40.8 | 411.8 MB |
+| distilbert-base-cased | 14.3 | 19.3 | 249.6 MB |
 
 SPEC §3 CPU NER latency budget: < 250 ms per request (measured/reported, not a hard gate).
 

@@ -49,8 +49,8 @@ Per-entity F1 (gold set, with 95% bootstrap CI and support):
 
 | | This model | Rules baseline |
 |---|---|---|
-| p50 latency (single request) | 32.3 ms | 0.1 ms |
-| p95 latency | 35.7 ms | 0.1 ms |
+| p50 latency (single request) | 37.2 ms | 0.1 ms |
+| p95 latency | 40.8 ms | 0.1 ms |
 | Export size | 411.8 MB | n/a (no file) |
 
 SPEC §3 CPU NER latency budget: < 250 ms per request (measured/reported, not a hard gate).

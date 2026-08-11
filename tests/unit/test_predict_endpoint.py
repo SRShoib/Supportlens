@@ -9,6 +9,7 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "models"
 STUB_BASELINE_MODEL = FIXTURES / "stub_intent" / "model.joblib"
 STUB_TRANSFORMER_DIR = FIXTURES / "stub_transformer_intent"
 STUB_NER_DIR = FIXTURES / "stub_ner"
+STUB_ENTITY_ROUTING_PATH = FIXTURES / "entity_routing_stub.json"
 
 client = TestClient(app)
 
@@ -17,14 +18,14 @@ client = TestClient(app)
 def _use_stub_models(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(predict._BASELINE_MODEL_PATHS, "intent", STUB_BASELINE_MODEL)
     monkeypatch.setitem(predict._TRANSFORMER_MODEL_DIRS, "intent", STUB_TRANSFORMER_DIR)
-    monkeypatch.setitem(predict._NER_MODEL_DIRS, "entities", STUB_NER_DIR)
+    monkeypatch.setattr(predict, "_ENTITY_ROUTING_PATH", STUB_ENTITY_ROUTING_PATH)
     predict._get_baseline_predictor.cache_clear()
     predict._get_transformer_predictor.cache_clear()
-    predict._get_ner_predictor.cache_clear()
+    predict._get_hybrid_entity_predictor.cache_clear()
     yield
     predict._get_baseline_predictor.cache_clear()
     predict._get_transformer_predictor.cache_clear()
-    predict._get_ner_predictor.cache_clear()
+    predict._get_hybrid_entity_predictor.cache_clear()
 
 
 def test_predict_intent_returns_results() -> None:
@@ -169,25 +170,57 @@ def test_predict_entities_transformer_flag_routes_to_transformer() -> None:
     assert "truncated" in body["results"][0]
 
 
-def test_predict_entities_missing_transformer_model_returns_503(
+def test_predict_entities_transformer_flag_still_applies_rules_routed_labels() -> None:
+    # ORDER_ID routes to "rules" in the stub routing config -- proves the
+    # hybrid predictor's rules-side merge works through the full API +
+    # JSON-serialization stack, not just at the unit level.
+    text = "order ORD-99321 shipped yesterday"
+    response = client.post("/predict/entities", json={"texts": [text], "model": "transformer"})
+
+    assert response.status_code == 200
+    entities = response.json()["results"][0]["entities"]
+    order_id_spans = [e for e in entities if e["label"] == "ORDER_ID"]
+    assert order_id_spans == [
+        {"start": 6, "end": 15, "label": "ORDER_ID", "text": "ORD-99321", "score": 1.0}
+    ]
+
+
+def test_predict_entities_missing_routing_file_returns_503(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setitem(predict._NER_MODEL_DIRS, "entities", Path("does/not/exist"))
-    predict._get_ner_predictor.cache_clear()
+    monkeypatch.setattr(predict, "_ENTITY_ROUTING_PATH", Path("does/not/exist.json"))
+    predict._get_hybrid_entity_predictor.cache_clear()
 
     response = client.post("/predict/entities", json={"texts": ["hello"], "model": "transformer"})
 
     assert response.status_code == 503
 
 
-def test_predict_entities_baseline_never_503s_even_when_transformer_dir_missing(
+def test_predict_entities_routing_file_present_but_model_dir_missing_returns_503(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bad_routing = tmp_path / "entity_routing.json"
+    bad_routing.write_text(
+        '{"labels": {}, "model_version": "missing", "model_export_dir": "does/not/exist"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(predict, "_ENTITY_ROUTING_PATH", bad_routing)
+    predict._get_hybrid_entity_predictor.cache_clear()
+
+    response = client.post("/predict/entities", json={"texts": ["hello"], "model": "transformer"})
+
+    assert response.status_code == 503
+
+
+def test_predict_entities_baseline_never_503s_even_when_routing_file_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The asymmetry this endpoint has and /predict/intent doesn't: the
     # rules extractor has no file on disk to be missing, so model="baseline"
-    # always succeeds regardless of whether a real NER export exists.
-    monkeypatch.setitem(predict._NER_MODEL_DIRS, "entities", Path("does/not/exist"))
-    predict._get_ner_predictor.cache_clear()
+    # always succeeds regardless of whether the routing file or a real NER
+    # export exists.
+    monkeypatch.setattr(predict, "_ENTITY_ROUTING_PATH", Path("does/not/exist.json"))
+    predict._get_hybrid_entity_predictor.cache_clear()
 
     response = client.post(
         "/predict/entities", json={"texts": ["charged $49.99 today"], "model": "baseline"}
