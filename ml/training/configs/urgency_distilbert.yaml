@@ -1,0 +1,9 @@
+model_name: distilbert-base-uncased
+task: urgency
+num_epochs: 2
+batch_size: 32
+eval_batch_size: 64
+learning_rate: 2.0e-5
+max_seq_length: 128
+warmup_ratio: 0.1
+weight_decay: 0.01

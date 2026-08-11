@@ -5,19 +5,22 @@ from api.main import app
 from api.routers import predict
 from fastapi.testclient import TestClient
 
-STUB_MODEL = (
-    Path(__file__).resolve().parents[1] / "fixtures" / "models" / "stub_intent" / "model.joblib"
-)
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "models"
+STUB_BASELINE_MODEL = FIXTURES / "stub_intent" / "model.joblib"
+STUB_TRANSFORMER_DIR = FIXTURES / "stub_transformer_intent"
 
 client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def _use_stub_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(predict, "_INTENT_MODEL_PATH", STUB_MODEL)
-    predict._get_intent_predictor.cache_clear()
+def _use_stub_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(predict._BASELINE_MODEL_PATHS, "intent", STUB_BASELINE_MODEL)
+    monkeypatch.setitem(predict._TRANSFORMER_MODEL_DIRS, "intent", STUB_TRANSFORMER_DIR)
+    predict._get_baseline_predictor.cache_clear()
+    predict._get_transformer_predictor.cache_clear()
     yield
-    predict._get_intent_predictor.cache_clear()
+    predict._get_baseline_predictor.cache_clear()
+    predict._get_transformer_predictor.cache_clear()
 
 
 def test_predict_intent_returns_results() -> None:
@@ -43,10 +46,65 @@ def test_predict_intent_rejects_empty_texts_list() -> None:
     assert response.status_code == 422
 
 
-def test_predict_intent_missing_model_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(predict, "_INTENT_MODEL_PATH", Path("does/not/exist.joblib"))
-    predict._get_intent_predictor.cache_clear()
+def test_predict_intent_missing_baseline_model_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(predict._BASELINE_MODEL_PATHS, "intent", Path("does/not/exist.joblib"))
+    predict._get_baseline_predictor.cache_clear()
 
     response = client.post("/predict/intent", json={"texts": ["hello"]})
+
+    assert response.status_code == 503
+
+
+def test_predict_intent_defaults_to_baseline_model() -> None:
+    response = client.post("/predict/intent", json={"texts": ["please cancel my order"]})
+    assert response.status_code == 200
+
+
+def test_predict_intent_transformer_flag_routes_to_transformer() -> None:
+    response = client.post(
+        "/predict/intent", json={"texts": ["please cancel my order"], "model": "transformer"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["results"][0]["label"] in {"cancel_order", "track_order", "refund_request"}
+
+
+def test_predict_intent_missing_transformer_model_returns_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(predict._TRANSFORMER_MODEL_DIRS, "intent", Path("does/not/exist"))
+    predict._get_transformer_predictor.cache_clear()
+
+    response = client.post("/predict/intent", json={"texts": ["hello"], "model": "transformer"})
+
+    assert response.status_code == 503
+
+
+def test_predict_intent_rejects_unknown_model_flag() -> None:
+    response = client.post(
+        "/predict/intent", json={"texts": ["hello"], "model": "not-a-real-model"}
+    )
+    assert response.status_code == 422
+
+
+def test_predict_urgency_endpoint_batches(monkeypatch: pytest.MonkeyPatch) -> None:
+    # urgency shares the same baseline-loading code path, keyed by task —
+    # stub it independently of intent to prove the two tasks don't share
+    # cached state.
+    monkeypatch.setitem(predict._BASELINE_MODEL_PATHS, "urgency", STUB_BASELINE_MODEL)
+    predict._get_baseline_predictor.cache_clear()
+
+    response = client.post("/predict/urgency", json={"texts": ["hello", "urgent refund now"]})
+
+    assert response.status_code == 200
+    assert len(response.json()["results"]) == 2
+
+
+def test_predict_urgency_missing_model_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(predict._BASELINE_MODEL_PATHS, "urgency", Path("does/not/exist.joblib"))
+    predict._get_baseline_predictor.cache_clear()
+
+    response = client.post("/predict/urgency", json={"texts": ["hello"]})
 
     assert response.status_code == 503
