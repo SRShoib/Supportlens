@@ -16,7 +16,12 @@ repos:
       - id: check-merge-conflict
       - id: detect-private-key
       - id: check-added-large-files
-        args: [--maxkb=512]
+        # M10: the four classical baseline .joblib files (~2.5-3.5MB each)
+        # and the demo seed fixtures (~550-710KB) are intentionally
+        # committed (docs/decisions.md) -- 4096 covers those with headroom
+        # while still catching an accidental transformer export or raw data
+        # dump (multi-hundred-MB) landing in a commit by mistake.
+        args: [--maxkb=4096]
 
   - repo: local
     hooks:

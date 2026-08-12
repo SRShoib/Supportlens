@@ -27,6 +27,19 @@ data/eval/*
 !data/eval/.gitkeep
 models/*
 !models/.gitkeep
+# M10: the classical baselines are tiny (<4MB each, no GPU/training-group
+# needed to reproduce) and are what the zero-setup demo serves live by
+# default (docs/decisions.md) -- committed so `make demo` needs no external
+# model host. Every transformer export (the opt-in, GPU-trained path) stays
+# gitignored.
+!models/baseline_intent_v1
+!models/baseline_intent_v1/model.joblib
+!models/baseline_urgency_v1
+!models/baseline_urgency_v1/model.joblib
+!models/baseline_sentiment_v1
+!models/baseline_sentiment_v1/model.joblib
+!models/baseline_emotion_v1
+!models/baseline_emotion_v1/model.joblib
 .chroma/
 
 # Env / secrets
