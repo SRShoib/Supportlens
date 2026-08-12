@@ -10,6 +10,10 @@ STUB_BASELINE_MODEL = FIXTURES / "stub_intent" / "model.joblib"
 STUB_TRANSFORMER_DIR = FIXTURES / "stub_transformer_intent"
 STUB_NER_DIR = FIXTURES / "stub_ner"
 STUB_ENTITY_ROUTING_PATH = FIXTURES / "entity_routing_stub.json"
+STUB_SENTIMENT_BASELINE_MODEL = FIXTURES / "stub_sentiment" / "model.joblib"
+STUB_SENTIMENT_TRANSFORMER_DIR = FIXTURES / "stub_transformer_sentiment"
+STUB_EMOTION_BASELINE_MODEL = FIXTURES / "stub_emotion" / "model.joblib"
+STUB_EMOTION_TRANSFORMER_DIR = FIXTURES / "stub_transformer_emotion"
 
 client = TestClient(app)
 
@@ -18,6 +22,12 @@ client = TestClient(app)
 def _use_stub_models(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(predict._BASELINE_MODEL_PATHS, "intent", STUB_BASELINE_MODEL)
     monkeypatch.setitem(predict._TRANSFORMER_MODEL_DIRS, "intent", STUB_TRANSFORMER_DIR)
+    monkeypatch.setitem(predict._BASELINE_MODEL_PATHS, "sentiment", STUB_SENTIMENT_BASELINE_MODEL)
+    monkeypatch.setitem(
+        predict._TRANSFORMER_MODEL_DIRS, "sentiment", STUB_SENTIMENT_TRANSFORMER_DIR
+    )
+    monkeypatch.setitem(predict._BASELINE_MODEL_PATHS, "emotion", STUB_EMOTION_BASELINE_MODEL)
+    monkeypatch.setitem(predict._TRANSFORMER_MODEL_DIRS, "emotion", STUB_EMOTION_TRANSFORMER_DIR)
     monkeypatch.setattr(predict, "_ENTITY_ROUTING_PATH", STUB_ENTITY_ROUTING_PATH)
     predict._get_baseline_predictor.cache_clear()
     predict._get_transformer_predictor.cache_clear()
@@ -111,6 +121,71 @@ def test_predict_urgency_missing_model_returns_503(monkeypatch: pytest.MonkeyPat
     predict._get_baseline_predictor.cache_clear()
 
     response = client.post("/predict/urgency", json={"texts": ["hello"]})
+
+    assert response.status_code == 503
+
+
+def test_predict_sentiment_returns_results() -> None:
+    response = client.post("/predict/sentiment", json={"texts": ["I love it"]})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["results"]) == 1
+    assert body["results"][0]["label"] == "positive"
+
+
+def test_predict_sentiment_batches_multiple_texts() -> None:
+    response = client.post("/predict/sentiment", json={"texts": ["I love it", "this is awful"]})
+
+    assert response.status_code == 200
+    assert len(response.json()["results"]) == 2
+
+
+def test_predict_sentiment_transformer_flag_routes_to_transformer() -> None:
+    response = client.post(
+        "/predict/sentiment", json={"texts": ["I love it"], "model": "transformer"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["label"] in {"negative", "neutral", "positive"}
+
+
+def test_predict_sentiment_missing_baseline_model_returns_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(predict._BASELINE_MODEL_PATHS, "sentiment", Path("does/not/exist.joblib"))
+    predict._get_baseline_predictor.cache_clear()
+
+    response = client.post("/predict/sentiment", json={"texts": ["hello"]})
+
+    assert response.status_code == 503
+
+
+def test_predict_emotion_returns_results() -> None:
+    response = client.post("/predict/emotion", json={"texts": ["so angry right now"]})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["results"]) == 1
+    assert body["results"][0]["label"] == "anger"
+
+
+def test_predict_emotion_transformer_flag_routes_to_transformer() -> None:
+    response = client.post(
+        "/predict/emotion", json={"texts": ["so angry right now"], "model": "transformer"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["label"] in {"anger", "joy", "optimism", "sadness"}
+
+
+def test_predict_emotion_missing_transformer_model_returns_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(predict._TRANSFORMER_MODEL_DIRS, "emotion", Path("does/not/exist"))
+    predict._get_transformer_predictor.cache_clear()
+
+    response = client.post("/predict/emotion", json={"texts": ["hello"], "model": "transformer"})
 
     assert response.status_code == 503
 

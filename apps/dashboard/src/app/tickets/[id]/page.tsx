@@ -2,7 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { EntityHighlightedText } from "@/components/entity-highlighted-text";
-import { type EntityResult, getTicket, predictEntities } from "@/lib/api";
+import { SentimentSparkline } from "@/components/sentiment-sparkline";
+import {
+  type EntityResult,
+  getSentimentTrajectory,
+  getTicket,
+  type SentimentTrajectoryPayload,
+  predictEntities,
+} from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 
 // Best-effort: the routing file or model export may not have been generated
@@ -17,6 +24,18 @@ async function getMessageEntities(texts: string[]): Promise<EntityResult[] | nul
   }
 }
 
+// Same best-effort contract: scripts/compute_sentiment_trajectories.py may
+// simply not have run yet against this ticket -- getSentimentTrajectory
+// already returns null for that case, but the API itself could still be
+// unreachable, so this stays defensive the same way getMessageEntities is.
+async function getTrajectory(ticketId: string): Promise<SentimentTrajectoryPayload | null> {
+  try {
+    return await getSentimentTrajectory(ticketId);
+  } catch {
+    return null;
+  }
+}
+
 export default async function TicketDetailPage({ params }: PageProps<"/tickets/[id]">) {
   const { id } = await params;
   const ticket = await getTicket(id);
@@ -24,7 +43,10 @@ export default async function TicketDetailPage({ params }: PageProps<"/tickets/[
     notFound();
   }
 
-  const entityResults = await getMessageEntities(ticket.messages.map((message) => message.text_clean));
+  const [entityResults, trajectory] = await Promise.all([
+    getMessageEntities(ticket.messages.map((message) => message.text_clean)),
+    getTrajectory(ticket.id),
+  ]);
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-10">
@@ -41,6 +63,15 @@ export default async function TicketDetailPage({ params }: PageProps<"/tickets/[
           {ticket.brand ? ` · ${ticket.brand}` : ""}
           {ticket.created_at ? ` · ${formatDateTime(ticket.created_at)}` : ""}
         </p>
+        {trajectory && (
+          <div className="mt-3">
+            <SentimentSparkline
+              sequence={trajectory.sequence}
+              scores={trajectory.scores}
+              resolutionQuality={trajectory.resolution_quality}
+            />
+          </div>
+        )}
       </header>
 
       <ol className="mt-8 space-y-4">

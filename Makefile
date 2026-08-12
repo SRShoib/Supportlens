@@ -1,6 +1,6 @@
 COMPOSE = docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: install install-training dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency ner-data ner-paraphrase ner-gold-export ner-gold-import train-ner eval-ner
+.PHONY: install install-training dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency ner-data ner-paraphrase ner-gold-export ner-gold-import train-ner eval-ner sentiment-emotion-data train-baseline-sentiment train-baseline-emotion predict-sentiment eval-sentiment
 
 install:
 	uv sync
@@ -109,3 +109,18 @@ train-ner:
 
 eval-ner:
 	uv run python scripts/generate_m4_report.py
+
+sentiment-emotion-data:
+	uv run python -m ml.training.tweet_eval_data
+
+train-baseline-sentiment:
+	uv run python -m ml.training.train_baseline_sentiment
+
+train-baseline-emotion:
+	uv run python -m ml.training.train_baseline_emotion
+
+predict-sentiment:
+	uv run python scripts/compute_sentiment_trajectories.py
+
+eval-sentiment:
+	uv run python scripts/generate_m5_report.py
