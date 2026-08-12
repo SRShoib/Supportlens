@@ -22,6 +22,21 @@ class LatencyResult:
     p95_ms: float
     max_ms: float
 
+    def to_metrics_dict(self) -> dict[str, Any]:
+        """Implements the same shape ml/evaluation/metrics.py's EvalMetrics
+        protocol expects (ClassificationMetrics/SpanMetrics/etc. already
+        rely on this), so a LatencyResult persists through
+        persist_eval_run() unchanged -- see scripts/generate_m9_latency_report.py,
+        the first caller that actually persists a latency benchmark rather
+        than only printing it or writing it into a markdown report."""
+        return {
+            "n_runs": self.n_runs,
+            "mean_ms": self.mean_ms,
+            "p50_ms": self.p50_ms,
+            "p95_ms": self.p95_ms,
+            "max_ms": self.max_ms,
+        }
+
 
 def benchmark_latency(
     predictor: Predictor[Any], text: str, *, warmup: int = 3, runs: int = 20

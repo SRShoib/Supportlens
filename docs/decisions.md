@@ -643,3 +643,43 @@ needlessly long (a support reply longer than ~400 tokens is itself a smell, not 
 **Alternatives:** treat the existing dollar guard as satisfying SPEC's wording (rejected — different failure
 mode, and SPEC's phrase "token ceiling" is specific enough that reinterpreting it would be silently
 reinterpreting an acceptance criterion, which CLAUDE.md's ground rule #1 says to raise, not do quietly).
+
+## 2026-08-12 — M9 latency EvalRuns get their own script, not folded into M3-M6's report scripts
+
+**Decision:** `scripts/generate_m9_latency_report.py` is a new, standalone script that loads every
+already-exported predictor across M2-M7 (17 targets: intent/urgency baseline+2 transformer variants each,
+entities rules+2 token-classification variants+the hybrid router, sentiment/emotion baseline+transformer,
+thread_summary extractive+FLAN-T5, M7's sentence embedder) and persists one `EvalRun` per target
+(`split="latency"`, `dataset="latency_probe"`), rather than adding a `persist_eval_run` call to M3-M6's
+existing report scripts at the point each of them already computes a `LatencyResult` via
+`ml/evaluation/latency.py::benchmark_latency` (confirmed by reading each script: M3/M4/M5/M6 all already
+benchmark latency, none of them ever persisted it — only printed it or wrote it into that module's own
+markdown report and model cards).
+**Why:** SPEC M9's accept criterion ("all metrics render from Postgres eval runs") requires latency
+percentiles to exist in `eval_runs` at all, which they didn't until now. Reusing M3-M6's own latency
+computation would mean re-running those scripts' full test-set accuracy evaluation (thousands of
+predictions, GPU-fine-tuned transformer inference over a full split in some cases) just to get a latency
+number, and — since `persist_eval_run` has no upsert (see the M6/M7 duplicate-row entries above) — would
+duplicate every accuracy `EvalRun` row on every latency-only rerun. A standalone script only loads each
+model once and times a fixed probe text per task.
+**Bug found and fixed before the real run landed:** the first draft reused the generic `_transformer()`
+helper (which loads `TransformerPredictor`, i.e. `AutoModelForSequenceClassification`) for M4's entity
+models too. Those are token-classification checkpoints; loading them through the sequence-classification
+head produced a real `transformers` warning ("newly initialized" pooler weights) and would have timed the
+wrong architecture. Fixed with a dedicated `_token_classification()` helper using
+`TokenClassificationPredictor`; the two stale entities rows from the first run were deleted from Postgres
+and the script re-run clean, same remediation pattern as the M6/M7 entries above.
+**model_version naming:** every row's `model_version` matches the string its task's own accuracy `EvalRun`
+already uses (M3/M5's `transformer_{model_slug}_v1`, M4's `transformer_entities_{model_slug}_v1`), so a
+latency row and its accuracy counterpart group under the same `(task, model_version)` pair in
+`GET /eval-runs`. Two new identifiers introduced here: `hybrid_ner_v1` for the rules+model router
+`apps/api/routers/predict.py` actually serves at `model="transformer"` (distinct from the pure
+token-classification model's own `EvalRun`, since it's a different predictor with a different latency
+profile), and `all-MiniLM-L6-v2` for M7's sentence embedder, which has no accuracy `EvalRun` at all (topic
+coherence is scored on the fitted topic model, not the embedder).
+**Real run result:** all 17 targets benchmarked clean, every model under its SPEC §3 p50 budget on this
+machine (`docs/m9-latency-report.md`) — worth re-running after any future retrain, since these numbers are
+machine-specific and will drift with hardware.
+**Alternatives:** add the persist call directly to M3-M6's scripts (rejected, cost above); benchmark only
+the "deployed" model per task instead of every variant (rejected — M3-M6's own reports already benchmark
+every variant, not just the winner, and the comparison value is the same here).
