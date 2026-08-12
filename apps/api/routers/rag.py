@@ -23,12 +23,12 @@ from api.config import Settings
 from api.db.models import Ticket
 from api.deps import DbDep, SettingsDep
 from api.schemas.rag import RagSourceOut, SuggestedReplyResponse
+from ml.data.documents import build_documents
 from ml.inference.base import EmbeddingPredictor
 from ml.inference.llm_client import BudgetExceededError, LLMClient, LLMDisabledError
 from ml.inference.rag_reply import draft_reply
 from ml.inference.reranker import Reranker
 from ml.inference.vector_store import ChromaVectorStore
-from scripts.compute_embeddings import build_documents
 
 router = APIRouter(prefix="/tickets", tags=["rag"])
 

@@ -35,45 +35,25 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from api.db.models import AuthorRole, Ticket, TicketSource
+from api.db.models import Ticket, TicketSource
 from api.db.session import SessionLocal
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
+
+from ml.data.documents import build_documents
 
 OUTPUT_DIR = Path("data/embeddings")
 OUTPUT_STEM = "tickets_minilm_v1"
 BATCH_SIZE = 64
 
 
-def _customer_document(ticket: Ticket) -> str | None:
-    customer_texts = [m.text_clean for m in ticket.messages if m.author_role == AuthorRole.CUSTOMER]
-    if not customer_texts:
-        return None
-    return "\n".join(customer_texts)
-
-
-def build_documents(tickets: list[Ticket]) -> tuple[list[str], list[str]]:
-    """Returns (ticket_ids, documents), skipping tickets with no customer
-    message -- the two lists stay index-aligned with each other and with
-    the embeddings array compute_and_write saves."""
-    ticket_ids: list[str] = []
-    documents: list[str] = []
-    for ticket in tickets:
-        document = _customer_document(ticket)
-        if document is None:
-            continue
-        ticket_ids.append(str(ticket.id))
-        documents.append(document)
-    return ticket_ids, documents
-
-
 def compute_and_write(session: Session, tickets: list[Ticket]) -> int:
     # Lazy import: sentence-transformers lives behind the `topics`
     # dependency group (not synced by default or in CI, see pyproject.toml)
     # -- keeping it out of this module's top-level imports means
-    # build_documents() above stays importable/unit-testable without that
-    # group installed, same pattern apps/api/routers/predict.py uses for
-    # transformers/torch.
+    # ml.data.documents.build_documents stays importable/unit-testable
+    # without that group installed, same pattern apps/api/routers/predict.py
+    # uses for transformers/torch.
     from ml.inference.embeddings import SentenceEmbeddingPredictor
 
     ticket_ids, documents = build_documents(tickets)

@@ -1,11 +1,17 @@
 .git
 .github
-data/
+# M10: data/seed/ (the small, git-committed demo fixtures) needs to reach
+# the api image; everything else under data/ (raw downloads, splits,
+# embeddings -- all gitignored, often multi-GB) still doesn't.
+data/*
+!data/seed
 models/
 tests/
 notebooks/
 docs/
-scripts/
+# M10: scripts/ needs to reach the api image too -- ml/data/seed_demo.py
+# imports scripts/index_search_corpus.py's Chroma-indexing functions
+# rather than duplicating them (docs/decisions.md).
 ml/training/
 .venv/
 __pycache__/

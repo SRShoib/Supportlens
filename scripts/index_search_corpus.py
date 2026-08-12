@@ -35,10 +35,10 @@ from api.db.session import SessionLocal
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from ml.data.documents import build_documents
 from ml.data.resolved_tickets import resolved_ticket_ids
 from ml.inference.base import format_dialogue
 from ml.inference.vector_store import ChromaVectorStore
-from scripts.compute_embeddings import build_documents
 
 RESOLVED_TICKETS_COLLECTION = "resolved_tickets"
 KB_ARTICLES_COLLECTION = "kb_articles"

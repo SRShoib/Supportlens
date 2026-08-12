@@ -1,6 +1,6 @@
 COMPOSE = docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: install install-training install-topics install-search dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency ner-data ner-paraphrase ner-gold-export ner-gold-import train-ner eval-ner sentiment-emotion-data train-baseline-sentiment train-baseline-emotion predict-sentiment eval-sentiment summarization-data train-summarization predict-summary judge-summaries eval-summarization embed-tickets fit-topics assign-topics topic-labels eval-topics kb-generate index-search build-retrieval-eval eval-search eval-latency compute-drift
+.PHONY: install install-training install-topics install-search dev up down clean logs ps demo demo-seed export-demo-seed test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency ner-data ner-paraphrase ner-gold-export ner-gold-import train-ner eval-ner sentiment-emotion-data train-baseline-sentiment train-baseline-emotion predict-sentiment eval-sentiment summarization-data train-summarization predict-summary judge-summaries eval-summarization embed-tickets fit-topics assign-topics topic-labels eval-topics kb-generate index-search build-retrieval-eval eval-search eval-latency compute-drift
 
 install:
 	uv sync
@@ -43,6 +43,21 @@ logs:
 
 ps:
 	$(COMPOSE) ps
+
+# M10 zero-setup demo path: only Docker + make + git needed on the host,
+# no local Python/uv setup -- everything the seed step needs (search group,
+# ml/, scripts/, the committed data/seed/ fixtures) already ships in the
+# api image. `git clone && cp .env.example .env && make demo` is the whole
+# quickstart (see README.md).
+demo: up demo-seed
+
+demo-seed:
+	$(COMPOSE) exec api python -m ml.data.seed_demo
+
+# Dev-only: regenerates data/seed/*.jsonl from the real dev corpus (requires
+# the full M1-M9 pipeline already run locally, not part of the demo path).
+export-demo-seed:
+	uv run python scripts/export_demo_seed.py
 
 test:
 	uv run pytest

@@ -40,6 +40,20 @@ services:
     env_file: ../.env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # .env's CHROMA_HOST/PORT (localhost:8001) are the *host*-side values
+      # for `make dev` (uvicorn running outside Docker) -- inside the api
+      # container, "localhost" is the container itself, not the chroma
+      # service, so search/RAG would silently fail to connect under
+      # `docker compose up` without this override (M10 finding, see
+      # docs/decisions.md). chroma:8000 is its internal compose-network
+      # address, same pattern DATABASE_URL above already uses.
+      CHROMA_HOST: chroma
+      CHROMA_PORT: 8000
+      # Same reasoning as CHROMA_HOST/PORT above -- .env's HF_HOME is a
+      # host-side path; the image bakes its own models into
+      # /app/.cache/huggingface at build time (infra/api.Dockerfile) and
+      # this keeps sentence-transformers/transformers pointed at it instead.
+      HF_HOME: /app/.cache/huggingface
     ports:
       - "${API_PORT}:8000"
     volumes:
