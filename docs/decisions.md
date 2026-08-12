@@ -424,3 +424,46 @@ package this time.
 transitively (`accelerate`, per the 2026-08-11 entries), so a broken copy is invisible until something deep
 in a dependency's dependency actually calls into it. Worth a quick `uv pip show <pkg>` + import sanity check
 on this machine after any `uv sync` if an unrelated-looking `AttributeError`/`ImportError` shows up mid-run.
+
+## 2026-08-12 — The real M7 run, and two real bugs found and fixed in the process
+
+**What happened:** the real pipeline landed on the full ~36.6k-ticket Twitter slice —
+`make embed-tickets` → `ml/training/topic_model.py` → `scripts/assign_topics.py` →
+`scripts/generate_m7_report.py`, all on CPU. BERTopic discovered 54 topics (10,132-ticket outlier
+cluster) against SPEC M7's ≥ 30 bar; KMeans's fixed `kmeans_n_clusters=40`.
+
+**Bug 1 — masking-token artifacts and unfiltered stopwords in c-TF-IDF keywords:** the first render
+of `docs/m7-comparison-report.md` showed top topics like `"user, url, the, in"` and
+`"user, emoji, url, face_with_tears_of_joy"` — not human-readable labels (SPEC M7's explicit
+requirement). Root cause: a `TfidfVectorizer`/`CountVectorizer`'s default tokenizer strips
+punctuation before counting, collapsing `ml/data/masking.py`'s `<USER>`/`<URL>`/`<EMAIL>`/`<PHONE>`
+tokens into bare `"user"`/`"url"`/... — words that then alias with organic English usage and are
+near-universal across the corpus (almost every ticket mentions the brand's @handle or a URL), so
+instead of being suppressed the way a true common-to-every-cluster term should be, they dominated
+nearly every topic. Separately, `fit_bertopic`'s `BERTopic(...)` call never configured a
+`vectorizer_model`, so — unlike the KMeans baseline's `_ctfidf_keywords`, which already passed
+`stop_words="english"` — BERTopic's own labels had no stopword filtering at all (`"the"`, `"in"`,
+`"you"`, `"of"` shown as top terms).
+**Fix:** `ml/training/topic_model.py:TOPIC_STOP_WORDS` — sklearn's English stopword list unioned with
+the mask tokens' bracket-stripped, lowercased forms (derived from `MaskToken` directly, not
+hardcoded, so it can't drift from `ml/data/masking.py`) — passed to both vectorizers. Real effect:
+BERTopic's top topic went from `"user, url, the, in"` (5,347 tickets) to `"food, store, just,
+chicken"`; mean NPMI rose from 0.1687 to 0.2259 (KMeans: 0.1072 → 0.1425). Covered by a regression
+test (`tests/unit/test_topic_model.py::test_ctfidf_keywords_filters_masking_tokens_and_english_stopwords`)
+built from realistic masked-text input.
+**Bug 2 — chart x-axis label overlap:** `topics-over-time-chart.tsx` rendered one `<text>` per week,
+built and browser-verified against a synthetic 6-week fixture during development. The real corpus's
+dense analysis window (`select_dense_window`, data-driven, not a fixed guess) turned out to be 78
+weeks — every label overlapped into unreadable noise. Fixed by capping to at most 9 evenly-spaced
+labels regardless of week count; re-verified in a browser against the real 78-week dataset, light and
+dark.
+**Also cleaned up:** re-running `scripts/generate_m7_report.py` after the c-TF-IDF fix left 2 stale
+pre-fix `EvalRun` rows (task="topics", the 0.1072/0.1687 NPMI numbers) alongside the 2 correct ones —
+`persist_eval_run` always inserts, it doesn't upsert, same as every other M-report script. Deleted the
+stale pair directly from Postgres, same remediation as the M6 duplicate-judging entry above.
+**Why this matters:** both bugs were invisible against synthetic test fixtures — the masking-token
+collapse only shows up with real masked text at real corpus frequency, and the label overlap only
+shows up with the real corpus's actual (larger, data-driven) week count. Neither is a gap in the unit
+tests being wrong, exactly; it's the general lesson M2–M6 already priced in (SPEC §7: "qualitative
+performance on real tweets" sections exist for exactly this reason) — a synthetic fixture proves the
+logic is correct, not that it's tuned for what real data actually looks like.
