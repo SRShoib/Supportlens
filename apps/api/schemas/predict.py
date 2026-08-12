@@ -33,3 +33,11 @@ class EntityResultOut(BaseModel):
 
 class EntitiesResponse(BaseModel):
     results: list[EntityResultOut]
+
+
+class SummaryResultOut(BaseModel):
+    summary: str
+
+
+class SummaryResponse(BaseModel):
+    results: list[SummaryResultOut]

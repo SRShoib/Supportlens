@@ -166,6 +166,17 @@ export async function getSentimentTrajectory(
   return (payload as unknown as SentimentTrajectoryPayload | undefined) ?? null;
 }
 
+// scripts/compute_thread_summaries.py stores the summary text directly on
+// Prediction.label (not payload) -- there's no secondary structure to a
+// summary the way sentiment_trajectory has sequence/scores, so a plain
+// string field is the whole payload. null for tickets the backfill script
+// skipped (< 2 messages) or hasn't reached yet -- same best-effort contract
+// as getSentimentTrajectory.
+export async function getThreadSummary(ticketId: string): Promise<string | null> {
+  const predictions = await getTicketPredictions(ticketId, "thread_summary");
+  return predictions[0]?.label ?? null;
+}
+
 // POST /predict/entities caps a single request at 100 texts
 // (apps/api/schemas/predict.py's PredictRequest), so a ticket with an
 // unusually long message history is chunked rather than truncated.

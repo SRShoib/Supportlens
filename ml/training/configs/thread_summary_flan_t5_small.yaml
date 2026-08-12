@@ -1,0 +1,10 @@
+model_name: google/flan-t5-small
+num_epochs: 3
+batch_size: 16
+eval_batch_size: 32
+learning_rate: 3e-4
+max_source_length: 512
+max_target_length: 64
+num_beams: 4
+warmup_ratio: 0.1
+weight_decay: 0.01
