@@ -121,6 +121,33 @@ class Prediction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Topic(Base):
+    """One topic from a fitted M7 topic model (BERTopic or the TF-IDF/
+    KMeans baseline) -- label + c-TF-IDF keywords, written once per topic
+    by scripts/assign_topics.py, read by GET /topics. Per-ticket topic
+    assignment is a Prediction(task="topic") row instead (matching M5/M6's
+    convention), not a column here -- this table is the small topic
+    catalog, not a per-ticket fact table. `topic_key` mirrors BERTopic's
+    own topic ids, where -1 is the HDBSCAN outlier cluster (never counted
+    toward SPEC M7's "≥ 30 coherent topics")."""
+
+    __tablename__ = "topics"
+    __table_args__ = (
+        UniqueConstraint("model_version", "topic_key", name="topics_model_version_topic_key"),
+        Index("ix_topics_model_version", "model_version"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    topic_key: Mapped[int] = mapped_column(nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    keywords: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    size: Mapped[int] = mapped_column(nullable=False)
+    model_version: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class LLMCall(Base):
     """Every OpenAI call, ever (CLAUDE.md hard rule) — the row set doubles as
     the persisted spend counter (SUM(cost_usd)) and a cache: a repeated
