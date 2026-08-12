@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from ml.evaluation.metrics import persist_eval_run
 from ml.evaluation.retrieval_metrics import RetrievalMetrics, compute_hit_rate, hit_at_k
+from ml.inference.rag_reply import MIN_CONFIDENCE
 from ml.inference.reranker import Reranker
 from ml.inference.retrieval import retrieve
 from ml.inference.vector_store import ChromaVectorStore
@@ -40,6 +41,20 @@ POOL_SIZE = 20
 WIN_MARGIN = 0.02
 N_EXAMPLE_QUERIES = 8
 
+# SPEC M8: "RAG endpoint refuses gracefully when retrieval confidence is
+# low (no-answer behavior demonstrated)". Run through the real retrieval
+# pipeline every time this report regenerates -- not a one-off manual
+# check -- so this evidence can't silently go stale (docs/decisions.md has
+# the original 5-vs-5 measurement that set MIN_CONFIDENCE).
+NO_ANSWER_EXAMPLES: list[tuple[str, str]] = [
+    ("on-topic", "my package never arrived, where is it"),
+    ("on-topic", "how do I reset my password"),
+    ("on-topic", "flight got cancelled and I need a refund"),
+    ("off-topic", "what is the capital of France"),
+    ("off-topic", "purple elephants dance under the moonlight"),
+    ("off-topic", "can you write me a poem about the ocean"),
+]
+
 
 @dataclass(frozen=True)
 class VariantResult:
@@ -47,6 +62,38 @@ class VariantResult:
     model_version: str
     metrics: RetrievalMetrics
     per_query_ranked_ids: list[list[str]]
+
+
+@dataclass(frozen=True)
+class NoAnswerExample:
+    kind: str  # "on-topic" | "off-topic"
+    query: str
+    best_score: float
+    would_refuse: bool
+
+
+def run_no_answer_examples(
+    examples: list[tuple[str, str]],
+    *,
+    embedder,
+    store: ChromaVectorStore,
+    reranker: Reranker,
+) -> list[NoAnswerExample]:
+    rows = []
+    for kind, query in examples:
+        ranked = retrieve(
+            query, embedder=embedder, store=store, reranker=reranker, pool_size=POOL_SIZE
+        )
+        best_score = ranked[0].score if ranked else float("-inf")
+        rows.append(
+            NoAnswerExample(
+                kind=kind,
+                query=query,
+                best_score=best_score,
+                would_refuse=best_score < MIN_CONFIDENCE,
+            )
+        )
+    return rows
 
 
 def run_variant(
@@ -128,8 +175,40 @@ def _render_recommendation(dense: VariantResult, rerank: VariantResult) -> list[
     return lines
 
 
+def _render_no_answer_section(rows: list[NoAnswerExample]) -> list[str]:
+    lines = [
+        '## No-answer behavior (SPEC M8: "RAG endpoint refuses gracefully when retrieval '
+        'confidence is low")',
+        "",
+        f"`POST /tickets/{{id}}/suggested-reply` refuses before ever calling the LLM whenever the "
+        f"best retrieved source's cross-encoder score is below `MIN_CONFIDENCE = {MIN_CONFIDENCE}` "
+        "(`ml/inference/rag_reply.py`, threshold derivation in `docs/decisions.md`). Demonstrated "
+        "here on 3 realistic support queries and 3 clearly off-topic ones, run through the real "
+        "retrieval pipeline against the real indexed corpus, not a fixture:",
+        "",
+        "| Query | Best cross-encoder score | Would refuse? |",
+        "|---|---|---|",
+    ]
+    for row in rows:
+        lines.append(
+            f"| {row.query} | {row.best_score:.3f} | {'yes' if row.would_refuse else 'no'} |"
+        )
+    lines.append("")
+    passed = all(row.would_refuse == (row.kind == "off-topic") for row in rows)
+    verdict = "PASS" if passed else "FAIL"
+    lines.append(
+        f"**{verdict}**: every off-topic query refuses and every on-topic query doesn't, on this run."
+    )
+    lines.append("")
+    return lines
+
+
 def _render_report(
-    queries: list[str], relevant_ids: list[str], dense: VariantResult, rerank: VariantResult
+    queries: list[str],
+    relevant_ids: list[str],
+    dense: VariantResult,
+    rerank: VariantResult,
+    no_answer_rows: list[NoAnswerExample],
 ) -> str:
     lines = [
         "# M8 comparison report: dense retrieval vs dense + cross-encoder rerank",
@@ -158,6 +237,7 @@ def _render_report(
         "",
         *_example_rows(queries, relevant_ids, dense, rerank),
         "",
+        *_render_no_answer_section(no_answer_rows),
     ]
     return "\n".join(lines)
 
@@ -202,6 +282,14 @@ def main() -> None:
         f"({rerank.metrics.n_queries} queries)"
     )
 
+    no_answer_rows = run_no_answer_examples(
+        NO_ANSWER_EXAMPLES, embedder=embedder, store=store, reranker=cross_encoder
+    )
+    n_correct = sum(row.would_refuse == (row.kind == "off-topic") for row in no_answer_rows)
+    print(
+        f"no-answer demonstration: {n_correct}/{len(no_answer_rows)} examples behaved as expected"
+    )
+
     session = SessionLocal()
     try:
         _persist(session, dense)
@@ -210,7 +298,9 @@ def main() -> None:
         session.close()
 
     REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    REPORT_PATH.write_text(_render_report(queries, relevant_ids, dense, rerank), encoding="utf-8")
+    REPORT_PATH.write_text(
+        _render_report(queries, relevant_ids, dense, rerank, no_answer_rows), encoding="utf-8"
+    )
     print(f"wrote {REPORT_PATH}")
 
 
