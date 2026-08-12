@@ -26,3 +26,13 @@ Reference week: `2017-10-09`. Live window (real scenario): `2017-11-06, 2017-11-
 | Prediction shift (PSI) | no alarm | alarm | PASS |
 
 **PASS** means: the real reference-week-vs-live-window comparison does not fire (normal week-to-week traffic isn't drift), and the simulated topically-different injection does fire (SPEC M9's demonstration).
+
+## Screenshots
+
+The `/metrics` dashboard's drift panel (`apps/dashboard/src/components/drift-panel.tsx`), rendering
+exactly the `GET /drift` response backed by the `eval_runs` rows above -- real (left) vs. simulated
+(right), light and dark:
+
+![Drift panel, light mode: real scenario stable on both signals, simulated scenario alarms on both](screenshots/m9-drift-real-vs-simulated-light.png)
+
+![Drift panel, dark mode: same real-vs-simulated contrast](screenshots/m9-drift-real-vs-simulated-dark.png)

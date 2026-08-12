@@ -750,3 +750,45 @@ map cleanly onto a flat list endpoint's response type); compute drift live in th
 persisted `EvalRun` rows (rejected — contradicts SPEC M9's own accept criterion, "all metrics render from
 Postgres eval runs", and every other M9/M7/M8 read endpoint already follows the same "API only reads
 durably-stored eval runs/predictions" contract).
+
+## 2026-08-12 — M9 `/metrics` dashboard: one bulk fetch, generic + task-specific components
+
+**Decision:** `apps/dashboard/src/app/metrics/page.tsx` makes exactly two requests
+(`listEvalRuns({ limit: 500 })` + `getDrift()`), groups the ~90-row `eval_runs` result by `task` in the
+Server Component, and renders SPEC M9's five named areas as their own components: `confusion-matrix.tsx`
+(hand-rolled HTML-table heatmap, not SVG — this is tabular data, and a table lets assistive tech read real
+cell values) + `per-class-f1-bars.tsx` for the four classification tasks (intent/urgency/sentiment/emotion),
+`span-metrics-table.tsx` for M4's per-entity-type F1 (span metrics have no confusion-matrix equivalent —
+spans aren't a fixed-size grid), `retrieval-panel.tsx` for M8's dense-vs-rerank hit-rate@5, `latency-table.tsx`
+for the newly-persisted latency EvalRuns (SPEC §3 budget flagged per row), and `drift-panel.tsx` for the 2x2
+real/simulated × embedding/prediction grid. A generic `eval-runs-table.tsx` (caller-supplied metric columns)
+covers everything else (per-task "all runs" comparison lists, topics NPMI, summarization ROUGE + judge
+scores) rather than a dedicated component per remaining task.
+**Why:** SPEC M9 names five metric surfaces explicitly ("per-model eval runs over time, confusion matrices,
+per-class F1, retrieval metrics, latency percentiles"); those get first-class components. Everything else
+(entities' span-level per-type isn't a confusion matrix; topics/summarization/judge have no chart type SPEC
+calls out) gets the generic table rather than inventing bespoke visualizations SPEC never asked for. Fetching
+once and grouping client-side (well, server-side in the RSC) avoids ~10 separate task-filtered API calls for
+a page whose entire dataset is currently under 100 rows.
+**Color:** dataviz-skill jobs, matching this dashboard's own established conventions rather than introducing
+new ones — magnitude (confusion matrix, per-class F1, retrieval bars) = single sequential blue hue, the same
+hue `topics-over-time-chart.tsx` already uses as its first categorical slot (different chart context, no
+legend collision); state (latency OK/OVER, drift stable/watch/alarm) = the status palette, reusing
+`emerging-issues-panel.tsx`'s existing red "alarm" class exactly and `sentiment-sparkline.tsx`'s emerald
+"positive"/stable convention, plus amber for PSI's middle "watch" band. Every status badge ships an icon +
+text label (never color alone); every confusion-matrix/span-table cell shows its raw number as text, color
+is a reinforcing channel only.
+**A real bug caught by browser-verifying against real data, not by `tsc`/`eslint` (both passed cleanly):**
+the first draft's Summarization ROUGE table read `runsByTask.get("thread_summary")` unfiltered, which now
+also contains the new `split="latency"` rows the M9 latency script persists under the same `task="thread_summary"`
+— those rows have no `rouge1`/`rouge2`/`rougeL` keys, so `.toFixed()` on `undefined` 500'd the whole page.
+Fixed by filtering `split !== "latency"` before the ROUGE table renders (`isAccuracyRun`), the same filter
+already applied to the classification and entities sections. Re-verified via a headless Playwright
+screenshot pass (light + dark, `console --errors` clean, real Postgres data) — see
+`docs/screenshots/m9-drift-real-vs-simulated-{light,dark}.png` for the drift panel specifically.
+**Alternatives:** a client-rendered page with per-section `useEffect` fetches (rejected — every other
+dashboard page in this app is a plain async Server Component, no reason for `/metrics` to be the exception,
+and RSC data is already server-fetched once at request time); SVG for the confusion matrix instead of an
+HTML table (rejected — the skill's own principle plus M7's topics-over-time-chart.tsx precedent both favor
+SVG for continuous/positional charts, but a matrix is inherently tabular data with a real column/row
+structure a `<table>` expresses directly).
