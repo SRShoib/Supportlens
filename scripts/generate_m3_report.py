@@ -75,6 +75,11 @@ def _iter_transformer_configs() -> list[TransformerConfig]:
     configs = []
     for config_path in sorted(CONFIGS_DIR.glob("*.yaml")):
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        # CONFIGS_DIR now also holds configs for other modules (e.g. M6's
+        # thread_summary_flan_t5_small.yaml) that have no `task` key at all --
+        # skip those here, before the unguarded raw["task"] index below.
+        if raw.get("task") not in TASKS:
+            continue
         model_slug = raw["model_name"].split("/")[-1]
         configs.append(TransformerConfig(task=raw["task"], model_slug=model_slug, hyperparams=raw))
     return configs
