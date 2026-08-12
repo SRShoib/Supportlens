@@ -27,7 +27,7 @@ repos:
     hooks:
       - id: mypy
         name: mypy
-        entry: uv run mypy apps/api ml/inference ml/data ml/evaluation
+        entry: uv run --frozen mypy apps/api ml/inference ml/data ml/evaluation
         language: system
         pass_filenames: false
         stages: [pre-push]
