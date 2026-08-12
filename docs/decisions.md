@@ -730,3 +730,23 @@ dependency into a batch eval script for no real benefit); gate the simulated sce
 ingestion pipeline run instead of an eval-script comparison (rejected in the same discussion — heavier,
 duplicates M1 machinery for a one-off demo, and M7/M8 already established the "eval-script simulation,
 screenshot the rendered result" pattern for exactly this kind of acceptance evidence).
+
+## 2026-08-12 — M9 API layer: GET /eval-runs is a thin read, GET /drift has its own fixed-shape schema
+
+**Decision:** `apps/api/routers/eval_runs.py` exposes `GET /eval-runs` (optional `task`/`model_version`
+filters, `limit`, newest-first) using the `EvalRunOut` schema that was already sitting in
+`apps/api/schemas/eval_run.py` unused since it was scaffolded — no computation happens in the router, it's a
+direct `select(EvalRun)`. `apps/api/routers/drift.py` exposes `GET /drift` returning a dedicated
+`DriftOut { real: {embedding, prediction}, simulated: {embedding, prediction} }` shape (each leaf is the
+latest `EvalRun` for that `(task, split)` pair, or `null` if `scripts/compute_drift.py` hasn't run yet)
+rather than making the dashboard filter a generic `/eval-runs?task=drift_embedding` list client-side into
+the 2x2 shape it actually needs.
+**Why:** `GET /eval-runs` needs to stay generic (every task's runs, arbitrary filters) since the `/metrics`
+page's per-task sections all read from it; the drift panel specifically needs a fixed 4-cell shape (real vs.
+simulated x embedding vs. prediction) every time, which is worth a small dedicated endpoint+schema rather
+than repeating the same "pick latest per (task,split) pair" grouping logic in the frontend.
+**Alternatives:** fold `/drift` into `/eval-runs` with extra query params (rejected — the 2x2 shape doesn't
+map cleanly onto a flat list endpoint's response type); compute drift live in the router instead of reading
+persisted `EvalRun` rows (rejected — contradicts SPEC M9's own accept criterion, "all metrics render from
+Postgres eval runs", and every other M9/M7/M8 read endpoint already follows the same "API only reads
+durably-stored eval runs/predictions" contract).
