@@ -516,3 +516,45 @@ LLM-judge/RAG-drafting budget lines suggest LLM calls are meant to be scoped nar
 default tool everywhere convenient); mechanical rendering of all real M7 topics including outliers/noise
 clusters (rejected — quality, see above); Bitext-only (27 articles, short of "~40" and loses the
 real-corpus grounding story that's part of this project's overall data-strategy narrative, SPEC §2).
+
+## 2026-08-12 — M8 RAG confidence gate: cross-encoder score > 0, measured against the real corpus
+
+**Decision:** `ml/inference/rag_reply.py::MIN_CONFIDENCE = 0.0`, checked against the top retrieved source's
+**cross-encoder** score (`cross-encoder/ms-marco-MiniLM-L-6-v2`, always applied inside `draft_reply` —
+independent of whatever `rerank` flag a `/search` UI call used) — below it, the endpoint refuses before ever
+calling the LLM (SPEC M8's "no-answer behavior").
+**Why:** measured directly against the real indexed corpus (7,676 resolved tickets + 40 KB articles) rather
+than guessed: 5 realistic support queries ("my package never arrived", "how do I reset my password", "I was
+charged twice for my order", "flight got cancelled and I need a refund", "my internet has been down for 2
+days") scored their best source at cross-encoder logits `[0.93, 9.02]`; 5 clearly off-topic queries (trivia,
+small talk, gibberish — "what is the capital of France", "purple elephants dance under the moonlight", etc.)
+scored `[-11.17, -3.33]` — a wide, clean gap either side of 0. Raw dense cosine similarity was checked too
+and rejected as the gate signal: on-topic queries scored similarity 0.60–0.71, off-topic scored 0.28–0.53 —
+close enough (e.g. one off-topic query at 0.526 vs. an on-topic query at 0.604) that a clean threshold isn't
+obvious the way it is for the cross-encoder score.
+**Alternatives:** gating on dense similarity instead (rejected — the overlap above); a threshold picked
+without measurement (rejected — CLAUDE.md rule #5's spirit: don't invent an unjustified number when the
+real corpus is sitting right there to check against, same instinct as M7's NPMI/z-score decisions).
+
+## 2026-08-12 — Bug found by real smoke test: a ticket's own text retrieved itself as a RAG source
+
+**Finding:** the first real (non-mocked) call to `POST /tickets/{id}/suggested-reply` — for a ticket about a
+password/iPhone sign-in issue — returned a draft citing 4 "similar resolved cases", but source `[1]` was the
+*exact same ticket* being drafted for. Root cause: a ticket's Chroma id in the `resolved_tickets` collection
+is its own `ticket_id` (`scripts/index_search_corpus.py`), and `suggested_reply` queries with that same
+ticket's own customer-problem text — querying with a document's own exact text against its own exact
+embedding is close to a perfect match, so it dominated the pool every time. Unit tests never caught this:
+every fixture used distinct ticket ids for "the ticket" and "the candidate sources", a distinction the real
+data doesn't preserve because there's exactly one document per ticket, and the query text passed to
+`draft_reply` always came from the very ticket being drafted for.
+**Fix:** `ml/inference/retrieval.py::retrieve` gained an `exclude_ids: frozenset[str]` parameter (default
+empty, so `apps/api/routers/search.py` — which never has anything to exclude — is unaffected);
+`ml/inference/rag_reply.py::draft_reply` takes `exclude_ticket_id` and passes it through;
+`apps/api/routers/rag.py` passes `str(ticket_id)`. Re-verified directly against the real corpus (bypassing
+the LLM call to avoid re-billing for a retrieval-only check): the same ticket's best self-excluded source
+score dropped from a self-match to genuinely different tickets, and a second real end-to-end call (different
+ticket, ~$0.0003) confirmed the drafted reply's sources no longer include the ticket itself.
+**Why this matters:** same lesson as M7's real-run entries above — a synthetic fixture proves the retrieval
+*logic* is correct, not that it's exercised the way real data actually shapes it (here: query text and one
+candidate document being derived from the exact same source object). Worth remembering for any future
+retrieval feature keyed by a document's own content.

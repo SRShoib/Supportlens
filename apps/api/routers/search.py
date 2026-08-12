@@ -6,30 +6,25 @@ time -- dense retrieval on an arbitrary live query can't be precomputed the
 way M7's corpus embedding was, a deliberate break from the "apps/api never
 loads an embedding model" precedent M7 documented (docs/decisions.md).
 
-Both collections share one embedding space (same MiniLM checkpoint,
-scripts/index_search_corpus.py), so their raw cosine similarities are
-directly comparable -- ranking the combined candidate pool by similarity
-(rerank=false) or cross-encoder score (rerank=true) needs no per-collection
-normalization.
+The actual embed -> retrieve -> rank pipeline lives in
+ml/inference/retrieval.py, shared with ml/inference/rag_reply.py -- this
+module is just the HTTP shape around it (request validation, model-loader
+caching, highlighting for display).
 """
 
 from functools import lru_cache
-from typing import Literal
 
 from fastapi import APIRouter
 
 from api.schemas.search import HighlightSpanOut, SearchRequest, SearchResponse, SearchResultOut
 from ml.inference.base import EmbeddingPredictor
 from ml.inference.highlight import highlight_matches
-from ml.inference.reranker import Reranker, rerank_by_score
+from ml.inference.reranker import Reranker
+from ml.inference.retrieval import RankedHit, SourceLabel, retrieve
 from ml.inference.vector_store import ChromaVectorStore, VectorHit
 
 router = APIRouter(prefix="/search", tags=["search"])
 
-SourceLabel = Literal["ticket", "kb_article"]
-
-RESOLVED_TICKETS_COLLECTION = "resolved_tickets"
-KB_ARTICLES_COLLECTION = "kb_articles"
 # Reranking only helps if there's a wider pool to re-order -- dense
 # retrieval alone just returns top_k directly per collection.
 RERANK_POOL_MULTIPLIER = 4
@@ -71,38 +66,28 @@ def _title_for(source: SourceLabel, hit: VectorHit) -> str | None:
     return None
 
 
-def _to_result(hit: VectorHit, source: SourceLabel, score: float, query: str) -> SearchResultOut:
-    spans = highlight_matches(query, hit.document)
+def _to_result(ranked: RankedHit, query: str) -> SearchResultOut:
+    spans = highlight_matches(query, ranked.hit.document)
     return SearchResultOut(
-        source=source,
-        id=hit.id,
-        title=_title_for(source, hit),
-        snippet=hit.document,
-        score=score,
+        source=ranked.source,
+        id=ranked.hit.id,
+        title=_title_for(ranked.source, ranked.hit),
+        snippet=ranked.hit.document,
+        score=ranked.score,
         highlights=[HighlightSpanOut(start=s.start, end=s.end) for s in spans],
     )
 
 
 @router.post("", response_model=SearchResponse)
 def search(request: SearchRequest) -> SearchResponse:
-    store = _get_vector_store()
-    embedder = _get_embedding_predictor()
-    query_vector = embedder.predict([request.query])[0].vector
-
     pool_size = _candidate_pool_size(request.top_k, request.rerank)
-    ticket_hits = store.query(RESOLVED_TICKETS_COLLECTION, query_vector, n_results=pool_size)
-    kb_hits = store.query(KB_ARTICLES_COLLECTION, query_vector, n_results=pool_size)
-    candidates: list[tuple[VectorHit, SourceLabel]] = [(hit, "ticket") for hit in ticket_hits] + [
-        (hit, "kb_article") for hit in kb_hits
-    ]
-
-    if request.rerank and candidates:
-        scores = _get_reranker().score(request.query, [hit.document for hit, _ in candidates])
-    else:
-        scores = [hit.similarity for hit, _ in candidates]
-
-    ranked = rerank_by_score(list(zip(candidates, scores, strict=True)), scores)
+    ranked = retrieve(
+        request.query,
+        embedder=_get_embedding_predictor(),
+        store=_get_vector_store(),
+        reranker=_get_reranker() if request.rerank else None,
+        pool_size=pool_size,
+    )
     top = ranked[: request.top_k]
-
-    results = [_to_result(hit, source, score, request.query) for (hit, source), score in top]
+    results = [_to_result(r, request.query) for r in top]
     return SearchResponse(results=results, reranked=request.rerank)
