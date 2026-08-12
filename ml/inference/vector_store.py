@@ -84,15 +84,20 @@ class ChromaVectorStore:
             from api.config import get_settings
 
             settings = get_settings()
-            # chromadb.HttpClient's real return type (ClientAPI) is a much
-            # wider, numpy/generic-parameterized interface than the minimal
-            # ChromaClient Protocol above -- structurally compatible at
-            # runtime (every call site here uses metadata= by keyword) but
-            # not close enough for mypy's protocol-assignment check to
-            # verify on its own.
-            self._client = chromadb.HttpClient(  # type: ignore[assignment]
-                host=host or settings.chroma_host, port=port or settings.chroma_port
-            )
+            # chromadb.HttpClient/PersistentClient's real return type
+            # (ClientAPI) is a much wider, numpy/generic-parameterized
+            # interface than the minimal ChromaClient Protocol above --
+            # structurally compatible at runtime (every call site here uses
+            # metadata= by keyword) but not close enough for mypy's
+            # protocol-assignment check to verify on its own.
+            if settings.chroma_embedded_path:
+                self._client = chromadb.PersistentClient(  # type: ignore[assignment]
+                    path=settings.chroma_embedded_path
+                )
+            else:
+                self._client = chromadb.HttpClient(  # type: ignore[assignment]
+                    host=host or settings.chroma_host, port=port or settings.chroma_port
+                )
 
     def _collection(self, name: str) -> Collection:
         return self._client.get_or_create_collection(name, metadata=COSINE_SPACE)

@@ -90,11 +90,11 @@ export function ConfusionMatrix({ labels, matrix }: ConfusionMatrixProps) {
                     <td
                       key={colIndex}
                       title={`actual ${labels[rowIndex]}, predicted ${labels[colIndex]}: ${value}`}
-                      className={`h-8 w-8 text-center tabular-nums ${SEQUENTIAL_STEPS[step]} ${
+                      className={`relative h-8 w-8 rounded-sm text-center tabular-nums transition-transform duration-150 hover:z-10 hover:scale-125 hover:shadow-md ${SEQUENTIAL_STEPS[step]} ${
                         step >= LIGHT_TEXT_STEP_INDEX
                           ? "text-white"
                           : "text-zinc-700 dark:text-zinc-200"
-                      } ${isDiagonal ? "ring-1 ring-inset ring-zinc-400 dark:ring-zinc-500" : ""}`}
+                      } ${isDiagonal ? "ring-1 ring-inset ring-indigo-400 dark:ring-indigo-400/70" : ""}`}
                     >
                       {value}
                     </td>

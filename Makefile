@@ -27,7 +27,7 @@ install-search:
 
 dev:
 	$(COMPOSE) up -d --wait postgres chroma
-	uv run uvicorn api.main:app --reload --app-dir apps/api --port 8000
+	uv run --frozen uvicorn api.main:app --reload --app-dir apps/api --port 8000
 
 up:
 	$(COMPOSE) up -d --wait

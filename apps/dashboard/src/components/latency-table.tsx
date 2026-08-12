@@ -52,29 +52,32 @@ export function LatencyTable({ runs }: LatencyTableProps) {
             const budget = BUDGET_MS_BY_TASK[run.task];
             const overBudget = budget !== undefined && metrics.p50_ms >= budget;
             return (
-              <tr key={run.id} className="border-t border-zinc-100 dark:border-zinc-800">
-                <td className="py-1 pr-3 text-zinc-700 dark:text-zinc-300">{run.task}</td>
-                <td className="py-1 pr-3 font-mono text-zinc-600 dark:text-zinc-400">
+              <tr
+                key={run.id}
+                className="border-t border-zinc-100 transition-colors duration-150 hover:bg-indigo-50/50 dark:border-white/5 dark:hover:bg-indigo-500/5"
+              >
+                <td className="py-1.5 pr-3 text-zinc-700 dark:text-zinc-300">{run.task}</td>
+                <td className="py-1.5 pr-3 font-mono text-zinc-600 dark:text-zinc-400">
                   {run.model_version}
                 </td>
-                <td className="py-1 pr-3 text-right tabular-nums text-zinc-700 dark:text-zinc-200">
+                <td className="py-1.5 pr-3 text-right tabular-nums text-zinc-700 dark:text-zinc-200">
                   {metrics.p50_ms.toFixed(1)} ms
                 </td>
-                <td className="py-1 pr-3 text-right tabular-nums text-zinc-500 dark:text-zinc-400">
+                <td className="py-1.5 pr-3 text-right tabular-nums text-zinc-500 dark:text-zinc-400">
                   {metrics.p95_ms.toFixed(1)} ms
                 </td>
-                <td className="py-1 pr-3 text-right tabular-nums text-zinc-400 dark:text-zinc-500">
+                <td className="py-1.5 pr-3 text-right tabular-nums text-zinc-400 dark:text-zinc-500">
                   {budget !== undefined ? `${budget} ms` : "—"}
                 </td>
-                <td className="py-1">
+                <td className="py-1.5">
                   {budget === undefined ? (
                     <span className="text-zinc-400 dark:text-zinc-500">—</span>
                   ) : overBudget ? (
-                    <span className="rounded-full bg-red-100 px-2 py-0.5 font-medium text-red-700 dark:bg-red-950 dark:text-red-400">
+                    <span className="rounded-full bg-red-100 px-2 py-0.5 font-medium text-red-700 dark:bg-red-500/15 dark:text-red-400">
                       over
                     </span>
                   ) : (
-                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">
                       ok
                     </span>
                   )}

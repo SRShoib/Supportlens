@@ -40,7 +40,7 @@ export function EntityHighlightedText({ text, entities }: EntityHighlightedTextP
       <mark
         key={`${span.start}-${span.end}-${span.label}`}
         title={`${span.label} · ${Math.round(span.score * 100)}% confidence`}
-        className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-inherit ${
+        className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-inherit shadow-sm transition-transform duration-150 hover:-translate-y-px hover:shadow ${
           LABEL_STYLES[span.label] ?? DEFAULT_LABEL_STYLE
         }`}
       >

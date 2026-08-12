@@ -26,7 +26,7 @@ export function HighlightedSnippet({ text, highlights }: HighlightedSnippetProps
     nodes.push(
       <mark
         key={`${span.start}-${span.end}`}
-        className="rounded bg-amber-100 px-0.5 text-inherit dark:bg-amber-900/40"
+        className="rounded-sm bg-amber-200/70 px-0.5 font-medium text-inherit dark:bg-amber-400/25"
       >
         {text.slice(span.start, span.end)}
       </mark>,

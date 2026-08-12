@@ -1,0 +1,62 @@
+# Render Blueprint for apps/api's free-tier deployment (see docs/decisions.md
+# for the full reasoning). Deploy via Render's "New Blueprint" flow pointing
+# at this repo -- Render prompts for every `sync: false` value once, then
+# remembers them. Everything here is additive to the existing local dev /
+# docker-compose setup, never required by it.
+#
+# Two things this deployment target does differently from docker-compose,
+# both opt-in via env vars below and both no-ops for local dev:
+#   - CHROMA_EMBEDDED_PATH: Render's free web services have no persistent
+#     disk (wiped on every restart/redeploy/spin-down-wake), so there's
+#     nowhere to run a separate long-lived `chroma` service. This switches
+#     ml/inference/vector_store.py to an on-disk chromadb.PersistentClient
+#     under /tmp instead of the networked HttpClient docker-compose uses.
+#   - RUN_DEMO_SEED_ON_BOOT: makes infra/api-entrypoint.sh re-run the
+#     idempotent data/seed/*.jsonl -> Postgres seed (a no-op after the first
+#     boot) and always rebuild the Chroma index from Postgres on every
+#     container start -- necessary because CHROMA_EMBEDDED_PATH above is
+#     wiped on every restart.
+#
+# Postgres is deliberately NOT a Render-managed database here: Render's own
+# free Postgres expires 30 days after creation (then a 14-day grace period
+# before deletion) -- Neon's free tier is a genuinely permanent Postgres
+# free tier instead. Create a Neon project separately and paste its
+# connection string (rewritten to the postgresql+psycopg:// scheme
+# apps/api/db/session.py's create_engine() needs -- Neon's own dashboard
+# gives you a plain postgresql:// one) into DATABASE_URL below.
+
+services:
+  - name: supportlens-api
+    type: web
+    runtime: docker
+    plan: free
+    dockerfilePath: ./infra/api.Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    envVars:
+      # Paste Neon's connection string here, with postgresql:// changed to
+      # postgresql+psycopg:// -- e.g.
+      # postgresql+psycopg://user:pass@ep-xxx.neon.tech/supportlens?sslmode=require
+      - key: DATABASE_URL
+        sync: false
+      - key: CHROMA_EMBEDDED_PATH
+        value: /tmp/chroma_data
+      - key: RUN_DEMO_SEED_ON_BOOT
+        value: "true"
+      - key: ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      # Optional -- leave OPENAI_API_KEY blank and LLM_ENABLED=false to
+      # deploy without the RAG suggested-reply feature at all (everything
+      # else works fully without it). Set both when ready to demo it live;
+      # remember this is a *public* URL once deployed, so anyone who finds
+      # it could exhaust the $5 budget guard before you get to show it off.
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: LLM_ENABLED
+        value: "false"
+      - key: LLM_BUDGET_USD
+        value: "5.00"
+      - key: RAG_MAX_COMPLETION_TOKENS
+        value: "400"

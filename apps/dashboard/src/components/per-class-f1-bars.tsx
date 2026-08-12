@@ -21,18 +21,21 @@ export function PerClassF1Bars({ perClassF1 }: PerClassF1BarsProps) {
 
   return (
     <ul className="space-y-1.5">
-      {entries.map(([label, f1]) => (
+      {entries.map(([label, f1], index) => (
         <li key={label} className="flex items-center gap-2 text-xs">
           <span className="w-28 shrink-0 truncate text-right text-zinc-600 dark:text-zinc-300" title={label}>
             {label}
           </span>
           <span
-            className="h-3.5 shrink-0 rounded-sm bg-zinc-100 dark:bg-zinc-800"
+            className="h-3.5 shrink-0 overflow-hidden rounded-full bg-zinc-100 dark:bg-white/5"
             style={{ width: `${TRACK_WIDTH_PX}px` }}
           >
             <span
-              className="block h-full rounded-sm bg-blue-500 dark:bg-blue-400"
-              style={{ width: `${Math.max(0, Math.min(1, f1)) * 100}%` }}
+              className="animate-grow-x block h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-500 dark:from-blue-400 dark:to-indigo-400"
+              style={{
+                width: `${Math.max(0, Math.min(1, f1)) * 100}%`,
+                animationDelay: `${index * 25}ms`,
+              }}
             />
           </span>
           <span className="w-10 shrink-0 tabular-nums text-zinc-500 dark:text-zinc-400">

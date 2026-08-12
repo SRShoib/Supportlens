@@ -1,0 +1,5 @@
+# Shell scripts run inside Linux containers -- force LF regardless of the
+# checkout platform's core.autocrlf, since a CRLF shebang/line ending makes
+# `sh` fail with "no such file or directory" or silently mis-parse the last
+# token on a line.
+*.sh text eol=lf

@@ -50,7 +50,7 @@ export function SentimentSparkline({
   const finalPoint = points[points.length - 1];
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="animate-fade-in flex items-center gap-2">
       <svg
         width={WIDTH}
         height={HEIGHT}

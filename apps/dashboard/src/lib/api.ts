@@ -182,10 +182,40 @@ export async function getThreadSummary(ticketId: string): Promise<string | null>
 // unusually long message history is chunked rather than truncated.
 const ENTITY_PREDICT_BATCH_SIZE = 100;
 
+async function predictEntitiesWithModel(
+  texts: string[],
+  model: PredictModel,
+): Promise<EntityResult[]> {
+  const response = await apiFetch<{ results: EntityResult[] }>("/predict/entities", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ texts, model }),
+  });
+  return response.results;
+}
+
 // `model: "transformer"` returns the hybrid rules+model predictor's output
 // (ml/inference/hybrid_ner.py): each entity type routed to whichever system
 // docs/m4-rules-vs-model-report.md found actually wins it on the gold set,
-// not pure model output.
+// not pure model output. Falls back to model="baseline" (pure rules) on a
+// 503 -- the transformer entity export is a multi-hundred-MB opt-in
+// artifact some deployments deliberately don't have (e.g. a free-tier host
+// with no RAM headroom for it, see docs/decisions.md), and the rules
+// extractor can never 503 (apps/api/routers/predict.py's
+// _get_entity_predictor) and already wins 4 of this task's 5 entity types
+// on the real gold set -- so this fallback is barely a downgrade even when
+// it triggers, and ticket pages keep their entity highlighting either way.
+async function predictEntitiesChunk(texts: string[]): Promise<EntityResult[]> {
+  try {
+    return await predictEntitiesWithModel(texts, "transformer");
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 503) {
+      return predictEntitiesWithModel(texts, "baseline");
+    }
+    throw error;
+  }
+}
+
 export async function predictEntities(texts: string[]): Promise<EntityResult[]> {
   if (texts.length === 0) {
     return [];
@@ -193,14 +223,44 @@ export async function predictEntities(texts: string[]): Promise<EntityResult[]> 
   const results: EntityResult[] = [];
   for (let offset = 0; offset < texts.length; offset += ENTITY_PREDICT_BATCH_SIZE) {
     const chunk = texts.slice(offset, offset + ENTITY_PREDICT_BATCH_SIZE);
-    const response = await apiFetch<{ results: EntityResult[] }>("/predict/entities", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ texts: chunk, model: "transformer" }),
-    });
-    results.push(...response.results);
+    results.push(...(await predictEntitiesChunk(chunk)));
   }
   return results;
+}
+
+// Mirrors apps/api/schemas/predict.py's PredictRequest/PredictResponse --
+// the four classification endpoints (/predict/intent, /predict/urgency,
+// /predict/sentiment, /predict/emotion) all share this exact request/
+// response shape, unlike /predict/entities and /predict/summary above.
+export type PredictModel = "baseline" | "transformer";
+export type ClassificationTask = "intent" | "urgency" | "sentiment" | "emotion";
+
+export interface TaskResult {
+  label: string;
+  score: number;
+  probabilities: Record<string, number> | null;
+}
+
+// Single text in, single result out -- the live "try it" playground's use
+// case, unlike the ticket-detail page's predictEntities which batches a
+// whole thread. Unauthenticated model="transformer" 503s (model export
+// missing, e.g. `make eval` hasn't been run) propagate as ApiError so the
+// caller can degrade per-task rather than fail the whole page.
+export async function predictClassification(
+  task: ClassificationTask,
+  text: string,
+  model: PredictModel,
+): Promise<TaskResult> {
+  const response = await apiFetch<PredictResponse>(`/predict/${task}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ texts: [text], model }),
+  });
+  return response.results[0];
+}
+
+interface PredictResponse {
+  results: TaskResult[];
 }
 
 // Mirrors apps/api/schemas/topic.py -- SPEC M7's topic catalog + weekly

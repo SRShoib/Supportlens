@@ -25,38 +25,41 @@ export function EvalRunsTable({ runs, columns, emptyMessage }: EvalRunsTableProp
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto rounded-lg">
       <table className="w-full text-left text-xs">
         <thead>
           <tr className="text-zinc-500 dark:text-zinc-400">
-            <th className="py-1 pr-3 font-medium">Model</th>
-            <th className="py-1 pr-3 font-medium">Dataset</th>
-            <th className="py-1 pr-3 font-medium">Split</th>
+            <th className="py-1.5 pr-3 font-medium">Model</th>
+            <th className="py-1.5 pr-3 font-medium">Dataset</th>
+            <th className="py-1.5 pr-3 font-medium">Split</th>
             {columns.map((col) => (
-              <th key={col.header} className="py-1 pr-3 text-right font-medium">
+              <th key={col.header} className="py-1.5 pr-3 text-right font-medium">
                 {col.header}
               </th>
             ))}
-            <th className="py-1 font-medium">Run at</th>
+            <th className="py-1.5 font-medium">Run at</th>
           </tr>
         </thead>
         <tbody>
           {runs.map((run) => (
-            <tr key={run.id} className="border-t border-zinc-100 dark:border-zinc-800">
-              <td className="py-1 pr-3 font-mono text-zinc-700 dark:text-zinc-300">
+            <tr
+              key={run.id}
+              className="border-t border-zinc-100 transition-colors duration-150 hover:bg-indigo-50/50 dark:border-white/5 dark:hover:bg-indigo-500/5"
+            >
+              <td className="py-1.5 pr-3 font-mono text-zinc-700 dark:text-zinc-300">
                 {run.model_version}
               </td>
-              <td className="py-1 pr-3 text-zinc-500 dark:text-zinc-400">{run.dataset}</td>
-              <td className="py-1 pr-3 text-zinc-500 dark:text-zinc-400">{run.split}</td>
+              <td className="py-1.5 pr-3 text-zinc-500 dark:text-zinc-400">{run.dataset}</td>
+              <td className="py-1.5 pr-3 text-zinc-500 dark:text-zinc-400">{run.split}</td>
               {columns.map((col) => (
                 <td
                   key={col.header}
-                  className="py-1 pr-3 text-right tabular-nums text-zinc-700 dark:text-zinc-200"
+                  className="py-1.5 pr-3 text-right tabular-nums text-zinc-700 dark:text-zinc-200"
                 >
                   {col.render(run)}
                 </td>
               ))}
-              <td className="py-1 text-zinc-400 dark:text-zinc-500">
+              <td className="py-1.5 text-zinc-400 dark:text-zinc-500">
                 {formatDateTime(run.started_at)}
               </td>
             </tr>
