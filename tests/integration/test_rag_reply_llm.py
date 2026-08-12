@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from ml.inference.base import EmbeddingResult
 from ml.inference.llm_client import LLMClient
-from ml.inference.rag_reply import draft_reply
+from ml.inference.rag_reply import MIN_CONFIDENCE, draft_reply
 from ml.inference.vector_store import VectorHit
 
 pytestmark = pytest.mark.integration
@@ -80,6 +80,31 @@ def test_draft_reply_drafts_and_returns_sources_when_confident(db_session: Sessi
     assert result.cited_indices == [1, 2]
     assert len(result.sources) == 2
     assert result.cached is False
+
+
+def test_draft_reply_drafts_when_best_score_is_exactly_at_the_confidence_threshold(
+    db_session: Session,
+) -> None:
+    # The gate is `score < MIN_CONFIDENCE` (ml/inference/rag_reply.py) --
+    # exactly-at-threshold is confident enough, only strictly-below refuses
+    # (covered separately by tests/unit/test_rag_reply.py's
+    # test_draft_reply_refuses_when_best_score_is_below_min_confidence).
+    store = FakeStore({"resolved_tickets": [TICKET_HIT], "kb_articles": []})
+    openai_client = MagicMock()
+    openai_client.chat.completions.create.return_value = _mock_response("Drafted anyway, see [1].")
+    llm_client = LLMClient(db_session, _settings(), openai_client)
+
+    result = draft_reply(
+        llm_client,
+        customer_issue="order is late",
+        embedder=FakeEmbedder(),
+        store=store,
+        reranker=FakeReranker({TICKET_HIT.document: MIN_CONFIDENCE}),
+        max_tokens=400,
+    )
+
+    assert result.refused is False
+    assert result.draft == "Drafted anyway, see [1]."
 
 
 def test_draft_reply_passes_max_tokens_through_to_the_llm_client(db_session: Session) -> None:
