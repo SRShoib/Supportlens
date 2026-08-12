@@ -1,6 +1,6 @@
 COMPOSE = docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: install install-training install-topics install-search dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency ner-data ner-paraphrase ner-gold-export ner-gold-import train-ner eval-ner sentiment-emotion-data train-baseline-sentiment train-baseline-emotion predict-sentiment eval-sentiment summarization-data train-summarization predict-summary judge-summaries eval-summarization embed-tickets fit-topics assign-topics topic-labels eval-topics kb-generate index-search build-retrieval-eval eval-search
+.PHONY: install install-training install-topics install-search dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency ner-data ner-paraphrase ner-gold-export ner-gold-import train-ner eval-ner sentiment-emotion-data train-baseline-sentiment train-baseline-emotion predict-sentiment eval-sentiment summarization-data train-summarization predict-summary judge-summaries eval-summarization embed-tickets fit-topics assign-topics topic-labels eval-topics kb-generate index-search build-retrieval-eval eval-search eval-latency compute-drift
 
 install:
 	uv sync
@@ -178,3 +178,9 @@ build-retrieval-eval:
 
 eval-search:
 	uv run python scripts/generate_m8_report.py
+
+eval-latency:
+	uv run python scripts/generate_m9_latency_report.py
+
+compute-drift:
+	uv run python scripts/compute_drift.py

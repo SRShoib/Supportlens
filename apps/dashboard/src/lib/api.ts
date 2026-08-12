@@ -328,3 +328,149 @@ export interface SuggestedReply {
 export async function getSuggestedReply(ticketId: string): Promise<SuggestedReply> {
   return apiFetch<SuggestedReply>(`/tickets/${ticketId}/suggested-reply`, { method: "POST" });
 }
+
+// Mirrors apps/api/schemas/eval_run.py -- SPEC M9's /metrics dashboard data
+// source. `metrics` is deliberately untyped here (its shape depends on
+// `task`: ml/evaluation/metrics.py's ClassificationMetrics for
+// intent/urgency/sentiment/emotion, span_metrics.py's SpanMetrics for
+// entities, rouge_metrics.py's SummarizationMetrics for thread_summary,
+// llm_judge_metrics.py's LLMJudgeMetrics for thread_summary_judge,
+// topic_metrics.py's CoherenceMetrics for topics, retrieval_metrics.py's
+// RetrievalMetrics for retrieval, latency.py's LatencyResult for
+// split="latency" rows, and drift_metrics.py's EmbeddingDriftResult/
+// PredictionDriftResult for drift_embedding/drift_prediction) -- callers
+// narrow with the specific *Metrics interfaces below, matching how
+// getSentimentTrajectory already casts Prediction.payload.
+export interface EvalRun {
+  id: string;
+  task: string;
+  model_version: string;
+  dataset: string;
+  split: string;
+  metrics: Record<string, unknown>;
+  params: Record<string, unknown>;
+  git_sha: string | null;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface ClassificationMetrics {
+  macro_f1: number;
+  per_class_f1: Record<string, number>;
+  confusion_matrix: number[][];
+  labels: string[];
+}
+
+export interface SpanTypeMetrics {
+  precision: number;
+  recall: number;
+  f1: number;
+  tp: number;
+  fp: number;
+  fn: number;
+  support: number;
+  f1_ci_low: number;
+  f1_ci_high: number;
+}
+
+export interface SpanMetrics {
+  per_type: Record<string, SpanTypeMetrics>;
+  micro_precision: number;
+  micro_recall: number;
+  micro_f1: number;
+  macro_f1: number;
+  boundary_f1: number;
+  partial_f1: number;
+  labels: string[];
+  n_documents: number;
+  n_gold_spans: number;
+}
+
+export interface SummarizationMetrics {
+  rouge1: number;
+  rouge2: number;
+  rougeL: number;
+  n: number;
+}
+
+export interface LLMJudgeMetrics {
+  n: number;
+  mean_faithfulness: number;
+  mean_coverage: number;
+  parsed_ok_rate: number;
+}
+
+export interface CoherenceMetrics {
+  mean_npmi: number;
+  n_topics: number;
+}
+
+export interface RetrievalRunMetrics {
+  hit_rate_at_k: number;
+  k: number;
+  n_queries: number;
+}
+
+export interface LatencyMetrics {
+  n_runs: number;
+  mean_ms: number;
+  p50_ms: number;
+  p95_ms: number;
+  max_ms: number;
+}
+
+// Mirrors ml/evaluation/drift_metrics.py's to_metrics_dict() shapes.
+export interface EmbeddingDriftMetrics {
+  cosine_shift: number;
+  is_alarm: boolean;
+  reference_n: number;
+  live_n: number;
+  threshold: number;
+}
+
+export type DriftStatus = "stable" | "watch" | "alarm";
+
+export interface PredictionDriftMetrics {
+  psi: number;
+  status: DriftStatus;
+  reference_dist: Record<string, number>;
+  live_dist: Record<string, number>;
+  reference_n: number;
+  live_n: number;
+  watch_threshold: number;
+  alarm_threshold: number;
+}
+
+export interface ListEvalRunsParams {
+  task?: string;
+  modelVersion?: string;
+  limit?: number;
+}
+
+export async function listEvalRuns(params: ListEvalRunsParams = {}): Promise<EvalRun[]> {
+  const search = new URLSearchParams();
+  if (params.task) search.set("task", params.task);
+  if (params.modelVersion) search.set("model_version", params.modelVersion);
+  if (params.limit !== undefined) search.set("limit", String(params.limit));
+  const query = search.toString();
+  return apiFetch<EvalRun[]>(`/eval-runs${query ? `?${query}` : ""}`);
+}
+
+// Mirrors apps/api/schemas/drift.py -- SPEC M9's drift panel, the latest
+// real-vs-simulated x embedding-vs-prediction EvalRuns
+// scripts/compute_drift.py persisted. A leaf is null until that script has
+// run at least once.
+export interface DriftScenario {
+  embedding: EvalRun | null;
+  prediction: EvalRun | null;
+}
+
+export interface Drift {
+  real: DriftScenario;
+  simulated: DriftScenario;
+}
+
+export async function getDrift(): Promise<Drift> {
+  return apiFetch<Drift>("/drift");
+}

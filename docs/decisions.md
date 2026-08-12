@@ -643,3 +643,152 @@ needlessly long (a support reply longer than ~400 tokens is itself a smell, not 
 **Alternatives:** treat the existing dollar guard as satisfying SPEC's wording (rejected — different failure
 mode, and SPEC's phrase "token ceiling" is specific enough that reinterpreting it would be silently
 reinterpreting an acceptance criterion, which the project's ground rule #1 says to raise, not do quietly).
+
+## 2026-08-12 — M9 latency EvalRuns get their own script, not folded into M3-M6's report scripts
+
+**Decision:** `scripts/generate_m9_latency_report.py` is a new, standalone script that loads every
+already-exported predictor across M2-M7 (17 targets: intent/urgency baseline+2 transformer variants each,
+entities rules+2 token-classification variants+the hybrid router, sentiment/emotion baseline+transformer,
+thread_summary extractive+FLAN-T5, M7's sentence embedder) and persists one `EvalRun` per target
+(`split="latency"`, `dataset="latency_probe"`), rather than adding a `persist_eval_run` call to M3-M6's
+existing report scripts at the point each of them already computes a `LatencyResult` via
+`ml/evaluation/latency.py::benchmark_latency` (confirmed by reading each script: M3/M4/M5/M6 all already
+benchmark latency, none of them ever persisted it — only printed it or wrote it into that module's own
+markdown report and model cards).
+**Why:** SPEC M9's accept criterion ("all metrics render from Postgres eval runs") requires latency
+percentiles to exist in `eval_runs` at all, which they didn't until now. Reusing M3-M6's own latency
+computation would mean re-running those scripts' full test-set accuracy evaluation (thousands of
+predictions, GPU-fine-tuned transformer inference over a full split in some cases) just to get a latency
+number, and — since `persist_eval_run` has no upsert (see the M6/M7 duplicate-row entries above) — would
+duplicate every accuracy `EvalRun` row on every latency-only rerun. A standalone script only loads each
+model once and times a fixed probe text per task.
+**Bug found and fixed before the real run landed:** the first draft reused the generic `_transformer()`
+helper (which loads `TransformerPredictor`, i.e. `AutoModelForSequenceClassification`) for M4's entity
+models too. Those are token-classification checkpoints; loading them through the sequence-classification
+head produced a real `transformers` warning ("newly initialized" pooler weights) and would have timed the
+wrong architecture. Fixed with a dedicated `_token_classification()` helper using
+`TokenClassificationPredictor`; the two stale entities rows from the first run were deleted from Postgres
+and the script re-run clean, same remediation pattern as the M6/M7 entries above.
+**model_version naming:** every row's `model_version` matches the string its task's own accuracy `EvalRun`
+already uses (M3/M5's `transformer_{model_slug}_v1`, M4's `transformer_entities_{model_slug}_v1`), so a
+latency row and its accuracy counterpart group under the same `(task, model_version)` pair in
+`GET /eval-runs`. Two new identifiers introduced here: `hybrid_ner_v1` for the rules+model router
+`apps/api/routers/predict.py` actually serves at `model="transformer"` (distinct from the pure
+token-classification model's own `EvalRun`, since it's a different predictor with a different latency
+profile), and `all-MiniLM-L6-v2` for M7's sentence embedder, which has no accuracy `EvalRun` at all (topic
+coherence is scored on the fitted topic model, not the embedder).
+**Real run result:** all 17 targets benchmarked clean, every model under its SPEC §3 p50 budget on this
+machine (`docs/m9-latency-report.md`) — worth re-running after any future retrain, since these numbers are
+machine-specific and will drift with hardware.
+**Alternatives:** add the persist call directly to M3-M6's scripts (rejected, cost above); benchmark only
+the "deployed" model per task instead of every variant (rejected — M3-M6's own reports already benchmark
+every variant, not just the winner, and the comparison value is the same here).
+
+## 2026-08-12 — M9 drift: reference week / live window choice, data sources, and threshold calibration
+
+**Decision:** `scripts/compute_drift.py` computes both of SPEC M9's drift signals — centroid cosine shift
+(embedding-distribution distance) and PSI (prediction-distribution shift, over the urgency label) — between
+a single **reference week** (`2017-10-09`) and a 4-week **live window** (`2017-11-06` through `2017-11-27`),
+both drawn from the real Twitter corpus's stable high-volume tail (~3500-3600 tickets/week each), separated
+by a 2-week gap so they aren't adjacent. Each signal also runs a **simulated** scenario: the same reference
+week against a slice of Bitext tickets (~3000 for the embedding signal, all 26,872 persisted for the PSI
+signal) standing in for "topically different live traffic" (SPEC M9: "feed the app a topically different
+slice"). Embedding vectors reuse M7's already-computed corpus embeddings
+(`data/embeddings/tickets_minilm_v1.{npy,parquet}`) for every real-corpus week; the Bitext slice is embedded
+once, offline, in this script (Bitext was deliberately excluded from M7's own embeddings — see the M7
+embedding-scope entry above). Urgency labels for both scenarios are read straight from M5's already-persisted
+`sentiment_trajectory` Prediction payloads (`payload["urgency_label"]`) — zero new inference for either
+signal.
+**Why these specific weeks:** queried directly against the real ingested corpus (36,579 Twitter tickets,
+`created_at` spanning 2008-05 to 2017-12). `select_dense_window` (M7's own dense-window logic, reused as-is)
+returns a 146-week contiguous run, but volume inside it ramps from 2 tickets/week (2015-02) to ~3600/week
+(late 2017) — the sparse early weeks would make either signal's centroid/PSI estimate noise-dominated.
+`2017-10-09` through `2017-11-27` is the last 8 weeks of that run, all within a stable 3500-3600 range —
+picked from *actually querying* the real weekly counts, not guessed.
+**Why urgency (not intent) for the prediction-drift signal:** already decided in the M9 planning discussion —
+intent is Bitext-trained and Bitext's `created_at` is always NULL (2026-08-12 M7 embedding-scope entry), so
+it structurally can't be bucketed by week at all. Urgency and sentiment both could; urgency was picked as the
+more operationally meaningful signal for a support-ticket system.
+**Threshold calibration (measured against the real corpus, same methodology as M7's z-score and M8's
+MIN_CONFIDENCE):**
+- PSI uses the standard, already-established interpretation bands (0.1 watch / 0.25 alarm) — not
+  corpus-specific, so not re-derived, but confirmed against real data anyway: real week-vs-week urgency PSI
+  measured 0.0064 (reference week vs. the real live window); the simulated Bitext injection measured 0.6679
+  — both land squarely inside their expected band.
+- Centroid cosine shift has no external convention, so `EMBEDDING_DRIFT_THRESHOLD = 0.05`
+  (`ml/evaluation/drift_metrics.py`) was picked from a direct measurement: real week-vs-week shift measured
+  0.0028-0.0044 across several week pairs tried during development; the simulated Bitext injection measured
+  0.60-0.64. The threshold sits roughly an order of magnitude above the real-noise ceiling and well below the
+  simulated signal, the same wide-clean-gap shape M8's confidence-gate measurement found.
+**Real run result:** both signals PASS SPEC M9's acceptance framing — real reference-week-vs-live-window
+comparisons fire no alarm on either signal (cosine shift 0.0028, PSI 0.0064, both "stable"/no-alarm), the
+simulated Bitext-injected scenario fires both (cosine shift 0.6044 alarm, PSI 0.6679 alarm) — see
+`docs/m9-drift-report.md`, generated from the persisted `eval_runs` rows, not hand-typed.
+**Alternatives:** recompute embeddings live for whatever window is requested instead of reusing M7's static
+artifact (rejected in the M9 planning discussion — duplicates M7's artifact and pulls a live-embedding
+dependency into a batch eval script for no real benefit); gate the simulated scenario behind a full M1
+ingestion pipeline run instead of an eval-script comparison (rejected in the same discussion — heavier,
+duplicates M1 machinery for a one-off demo, and M7/M8 already established the "eval-script simulation,
+screenshot the rendered result" pattern for exactly this kind of acceptance evidence).
+
+## 2026-08-12 — M9 API layer: GET /eval-runs is a thin read, GET /drift has its own fixed-shape schema
+
+**Decision:** `apps/api/routers/eval_runs.py` exposes `GET /eval-runs` (optional `task`/`model_version`
+filters, `limit`, newest-first) using the `EvalRunOut` schema that was already sitting in
+`apps/api/schemas/eval_run.py` unused since it was scaffolded — no computation happens in the router, it's a
+direct `select(EvalRun)`. `apps/api/routers/drift.py` exposes `GET /drift` returning a dedicated
+`DriftOut { real: {embedding, prediction}, simulated: {embedding, prediction} }` shape (each leaf is the
+latest `EvalRun` for that `(task, split)` pair, or `null` if `scripts/compute_drift.py` hasn't run yet)
+rather than making the dashboard filter a generic `/eval-runs?task=drift_embedding` list client-side into
+the 2x2 shape it actually needs.
+**Why:** `GET /eval-runs` needs to stay generic (every task's runs, arbitrary filters) since the `/metrics`
+page's per-task sections all read from it; the drift panel specifically needs a fixed 4-cell shape (real vs.
+simulated x embedding vs. prediction) every time, which is worth a small dedicated endpoint+schema rather
+than repeating the same "pick latest per (task,split) pair" grouping logic in the frontend.
+**Alternatives:** fold `/drift` into `/eval-runs` with extra query params (rejected — the 2x2 shape doesn't
+map cleanly onto a flat list endpoint's response type); compute drift live in the router instead of reading
+persisted `EvalRun` rows (rejected — contradicts SPEC M9's own accept criterion, "all metrics render from
+Postgres eval runs", and every other M9/M7/M8 read endpoint already follows the same "API only reads
+durably-stored eval runs/predictions" contract).
+
+## 2026-08-12 — M9 `/metrics` dashboard: one bulk fetch, generic + task-specific components
+
+**Decision:** `apps/dashboard/src/app/metrics/page.tsx` makes exactly two requests
+(`listEvalRuns({ limit: 500 })` + `getDrift()`), groups the ~90-row `eval_runs` result by `task` in the
+Server Component, and renders SPEC M9's five named areas as their own components: `confusion-matrix.tsx`
+(hand-rolled HTML-table heatmap, not SVG — this is tabular data, and a table lets assistive tech read real
+cell values) + `per-class-f1-bars.tsx` for the four classification tasks (intent/urgency/sentiment/emotion),
+`span-metrics-table.tsx` for M4's per-entity-type F1 (span metrics have no confusion-matrix equivalent —
+spans aren't a fixed-size grid), `retrieval-panel.tsx` for M8's dense-vs-rerank hit-rate@5, `latency-table.tsx`
+for the newly-persisted latency EvalRuns (SPEC §3 budget flagged per row), and `drift-panel.tsx` for the 2x2
+real/simulated × embedding/prediction grid. A generic `eval-runs-table.tsx` (caller-supplied metric columns)
+covers everything else (per-task "all runs" comparison lists, topics NPMI, summarization ROUGE + judge
+scores) rather than a dedicated component per remaining task.
+**Why:** SPEC M9 names five metric surfaces explicitly ("per-model eval runs over time, confusion matrices,
+per-class F1, retrieval metrics, latency percentiles"); those get first-class components. Everything else
+(entities' span-level per-type isn't a confusion matrix; topics/summarization/judge have no chart type SPEC
+calls out) gets the generic table rather than inventing bespoke visualizations SPEC never asked for. Fetching
+once and grouping client-side (well, server-side in the RSC) avoids ~10 separate task-filtered API calls for
+a page whose entire dataset is currently under 100 rows.
+**Color:** dataviz-skill jobs, matching this dashboard's own established conventions rather than introducing
+new ones — magnitude (confusion matrix, per-class F1, retrieval bars) = single sequential blue hue, the same
+hue `topics-over-time-chart.tsx` already uses as its first categorical slot (different chart context, no
+legend collision); state (latency OK/OVER, drift stable/watch/alarm) = the status palette, reusing
+`emerging-issues-panel.tsx`'s existing red "alarm" class exactly and `sentiment-sparkline.tsx`'s emerald
+"positive"/stable convention, plus amber for PSI's middle "watch" band. Every status badge ships an icon +
+text label (never color alone); every confusion-matrix/span-table cell shows its raw number as text, color
+is a reinforcing channel only.
+**A real bug caught by browser-verifying against real data, not by `tsc`/`eslint` (both passed cleanly):**
+the first draft's Summarization ROUGE table read `runsByTask.get("thread_summary")` unfiltered, which now
+also contains the new `split="latency"` rows the M9 latency script persists under the same `task="thread_summary"`
+— those rows have no `rouge1`/`rouge2`/`rougeL` keys, so `.toFixed()` on `undefined` 500'd the whole page.
+Fixed by filtering `split !== "latency"` before the ROUGE table renders (`isAccuracyRun`), the same filter
+already applied to the classification and entities sections. Re-verified via a headless Playwright
+screenshot pass (light + dark, `console --errors` clean, real Postgres data) — see
+`docs/screenshots/m9-drift-real-vs-simulated-{light,dark}.png` for the drift panel specifically.
+**Alternatives:** a client-rendered page with per-section `useEffect` fetches (rejected — every other
+dashboard page in this app is a plain async Server Component, no reason for `/metrics` to be the exception,
+and RSC data is already server-fetched once at request time); SVG for the confusion matrix instead of an
+HTML table (rejected — the skill's own principle plus M7's topics-over-time-chart.tsx precedent both favor
+SVG for continuous/positional charts, but a matrix is inherently tabular data with a real column/row
+structure a `<table>` expresses directly).
