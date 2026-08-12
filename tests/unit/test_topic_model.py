@@ -66,6 +66,32 @@ def test_ctfidf_keywords_empty_cluster_returns_empty_list() -> None:
     assert _ctfidf_keywords(["a"], [0], topic_key=99) == []
 
 
+def test_ctfidf_keywords_filters_masking_tokens_and_english_stopwords() -> None:
+    # Regression test: ml/data/masking.py's <USER>/<URL> tokens are near-
+    # universal (almost every real ticket mentions the brand's @handle or a
+    # URL) -- a plain TfidfVectorizer's default tokenizer strips the angle
+    # brackets before counting, collapsing them into bare "user"/"url" that
+    # then dominate every topic's keywords instead of being suppressed the
+    # way a true common-to-every-cluster term should be (found on the real
+    # M7 run: "user, url, the, in" as a top-ranked topic label).
+    documents = [
+        "<USER> <URL> refund my order please",
+        "<USER> <URL> order refund is late",
+        "<USER> <URL> please refund this order",
+        "<USER> <URL> battery drains too fast",
+        "<USER> <URL> phone battery is bad",
+        "<USER> <URL> battery charge broken",
+    ]
+    assignments = [0, 0, 0, 1, 1, 1]
+
+    keywords = _ctfidf_keywords(documents, assignments, topic_key=0)
+
+    assert "user" not in keywords
+    assert "url" not in keywords
+    assert "the" not in keywords  # plain English stopword, not just a mask artifact
+    assert "refund" in keywords
+
+
 def test_fit_kmeans_baseline_separates_two_obvious_clusters() -> None:
     embeddings = np.array(
         [
