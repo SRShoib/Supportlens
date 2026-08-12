@@ -148,6 +148,37 @@ class Topic(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class KbArticle(Base):
+    """A synthetic knowledge-base article (SPEC M8: "a small synthetic KB
+    (~40 articles)") -- generated once by ml/data/kb_generate.py, purely
+    templated (no LLM cost; SPEC §5's M8 budget line is earmarked for RAG
+    reply drafting, not KB writing, see docs/decisions.md). Postgres is the
+    canonical source, same "canonical table, Chroma is a derived index"
+    relationship Ticket/Message already have with M7's embeddings --
+    scripts/index_search_corpus.py reads these rows and pushes them into the
+    `kb_articles` Chroma collection, it never writes here.
+
+    `id` is deterministic (ml/data/ids.py::deterministic_id, keyed off
+    generator_version + source_kind + source_key), not random uuid4 like
+    Topic/Prediction -- kb_generate.py is fully reproducible from its inputs,
+    so re-running it is a natural upsert instead of needing a
+    delete-everything-first step."""
+
+    __tablename__ = "kb_articles"
+    __table_args__ = (
+        UniqueConstraint("generator_version", "title", name="kb_articles_generator_version_title"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[str] = mapped_column(String, nullable=False)
+    tags: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    source_kind: Mapped[str] = mapped_column(String, nullable=False)
+    source_key: Mapped[str] = mapped_column(String, nullable=False)
+    generator_version: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class LLMCall(Base):
     """Every OpenAI call, ever (CLAUDE.md hard rule) — the row set doubles as
     the persisted spend counter (SUM(cost_usd)) and a cache: a repeated

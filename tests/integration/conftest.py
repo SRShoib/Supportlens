@@ -61,7 +61,10 @@ def db_session(migrated_db: str) -> Iterator[Session]:
     # The container is session-scoped for speed, so start every test from a
     # clean slate rather than accumulating rows across tests in this module.
     session.execute(
-        text("TRUNCATE TABLE predictions, messages, tickets, eval_runs, llm_calls, topics CASCADE")
+        text(
+            "TRUNCATE TABLE predictions, messages, tickets, eval_runs, llm_calls, topics, "
+            "kb_articles CASCADE"
+        )
     )
     session.commit()
     yield session

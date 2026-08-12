@@ -467,3 +467,52 @@ shows up with the real corpus's actual (larger, data-driven) week count. Neither
 tests being wrong, exactly; it's the general lesson M2–M6 already priced in (SPEC §7: "qualitative
 performance on real tweets" sections exist for exactly this reason) — a synthetic fixture proves the
 logic is correct, not that it's tuned for what real data actually looks like.
+
+## 2026-08-12 — M8 "resolved tickets" defined from M5's resolution_quality, not "has an agent reply"
+
+**Decision:** `ml/data/resolved_tickets.py::resolved_ticket_ids` defines a resolved ticket as a
+`TicketSource.TWITTER` ticket whose `sentiment_trajectory` Prediction (SPEC M5,
+`ml/inference/sentiment_trajectory.py`) has `Prediction.score` (resolution_quality) strictly positive.
+**Why:** the canonical schema has no explicit resolution status anywhere (no `status` column, no loader
+ever sets one) and SPEC M8's text ("index resolved tickets") doesn't define one either. The first candidate
+— "has at least one agent message" — was measured against the real ingested corpus before being written:
+36,578 of 36,579 Twitter tickets have an agent reply (99.997%). The twcs dataset's conversation grouping is
+curated around brand-response threads, so nearly every captured ticket includes one by construction; that
+definition doesn't discriminate anything, so indexing "resolved tickets" under it would mean indexing
+essentially the whole Twitter corpus, defeating the point of a "similar *resolved* cases" retrieval corpus
+for RAG. resolution_quality > 0 does discriminate (7,677 of 36,579 Twitter tickets at the real-run scale,
+~21%) and is semantically closer to what the RAG use case needs — "show the agent an example of this kind
+of issue being resolved *well*" — since M5 already ties it to the customer's final-message sentiment
+discounted by opening urgency. Bitext is excluded entirely, same reasoning as every real-corpus module
+since M7: synthetic single-turn instruction/response pairs, no real resolution to speak of.
+**Alternatives:** `resolution_quality >= 0` (rejected — includes exact-neutral endings, ~59% of the corpus,
+too permissive to read as "resolved well"); "agent had the last message" (rejected — untested against the
+real corpus and likely close to as degenerate as the agent-reply-exists candidate, for the same structural
+reason); a brand-new heuristic independent of M5 (rejected — M5 already computed and persisted a signal
+that means almost exactly what's needed here, inventing a second one would duplicate reasoning already
+priced into `sentiment_trajectory.py`'s design, see its module docstring).
+
+## 2026-08-12 — M8 KB articles: templated, not LLM-generated; 13 of 40 hand-picked from real M7 topics
+
+**Decision:** `ml/data/kb_generate.py` generates all 40 SPEC-M8 KB articles from hardcoded, hand-authored
+`ArticleSpec` templates — 27 keyed to the real Bitext intent taxonomy (queried from Postgres:
+`Ticket.meta["intent"]` across all ingested `TicketSource.BITEXT` rows, confirmed exactly 27 distinct
+values) and 13 keyed to hand-picked entries from the real M7 `topics` table
+(`model_version="topics_bertopic_v1"`), rewritten as clean brand-agnostic prose rather than rendered
+mechanically from their raw c-TF-IDF keyword strings.
+**Why:** SPEC §5's M8 budget line ("RAG reply drafting (demo + cache warm) ≈ $1.50") is earmarked for reply
+drafting specifically; there's no separate line for writing the KB, so an LLM-generated KB would either
+overrun the module's own budget allocation or eat into the shared reserve for no clearly-scoped reason.
+Rendering the real topic catalog directly was tried conceptually and rejected once the actual topic labels
+were inspected: several of the real clusters are noise ("wtf, does, jpg, love"; "fuck, worst, suck, hate")
+or too vague to summarize ("service, customer, hold, chat") — a KB "article" auto-titled from one of those
+would read as garbage or, worse, profanity, in a portfolio demo. The 13 chosen topics are all real,
+coherent clusters (flights, gaming account issues, ride-share trips, train tickets, streaming playback,
+mobile OS updates, internet outages, package delivery, baggage, card payments, software updates, TV/channel
+access, food/store orders) — each article's `source_key`/`tags` still cite the originating `topic_key` for
+traceability, but the prose itself is hand-written, not templated from the keyword list.
+**Alternatives:** LLM-drafted articles from intent/topic names (rejected — budget, plus SPEC's own explicit
+LLM-judge/RAG-drafting budget lines suggest LLM calls are meant to be scoped narrowly, not used as a
+default tool everywhere convenient); mechanical rendering of all real M7 topics including outliers/noise
+clusters (rejected — quality, see above); Bitext-only (27 articles, short of "~40" and loses the
+real-corpus grounding story that's part of this project's overall data-strategy narrative, SPEC §2).
