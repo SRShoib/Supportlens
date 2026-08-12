@@ -27,6 +27,13 @@ ml = [
     "tokenizers>=0.20",
     "spacy>=3.8",
     "en-core-web-sm",
+    # M6 ROUGE-1/2/L (ml/evaluation/rouge_metrics.py). A default-group dep
+    # (like scikit-learn above it, used by ml/evaluation/metrics.py) rather
+    # than `training`-only: ml/evaluation/* is CI-tested code, not GPU-only
+    # tooling. Used directly (rouge_score.rouge_scorer), not via
+    # evaluate.load("rouge") -- that wrapper fetches a metric script from the
+    # HF Hub at eval time; this way stays offline once the package is synced.
+    "rouge-score>=0.1",
 ]
 dev = [
     "pytest>=8.3",
@@ -127,6 +134,7 @@ module = [
     "accelerate.*",
     "evaluate.*",
     "yaml.*",
+    "rouge_score.*",
 ]
 ignore_missing_imports = true
 
