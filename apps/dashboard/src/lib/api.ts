@@ -257,3 +257,74 @@ export async function getTopicVolume(): Promise<TopicVolumeResponse> {
 export async function getEmergingIssues(): Promise<EmergingIssue[]> {
   return apiFetch<EmergingIssue[]>("/topics/emerging");
 }
+
+// Mirrors apps/api/schemas/search.py -- SPEC M8's dense-retrieval-plus-
+// optional-rerank search endpoint. `highlights` are char offsets into
+// exactly `snippet` (ml/inference/highlight.py's contract, same "offsets
+// into the unmodified string" rule EntitySpan above already follows).
+export interface SearchHighlight {
+  start: number;
+  end: number;
+}
+
+export type SearchResultSource = "ticket" | "kb_article";
+
+export interface SearchResult {
+  source: SearchResultSource;
+  id: string;
+  title: string | null;
+  snippet: string;
+  score: number;
+  highlights: SearchHighlight[];
+}
+
+export interface SearchResponse {
+  results: SearchResult[];
+  reranked: boolean;
+}
+
+export interface SearchParams {
+  topK?: number;
+  rerank?: boolean;
+}
+
+export async function search(query: string, params: SearchParams = {}): Promise<SearchResponse> {
+  return apiFetch<SearchResponse>("/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      query,
+      top_k: params.topK ?? 5,
+      rerank: params.rerank ?? true,
+    }),
+  });
+}
+
+// Mirrors apps/api/schemas/rag.py -- SPEC M8's RAG suggested-reply
+// endpoint. Unlike every getX above, this triggers a real (cached,
+// budget-guarded) OpenAI call server-side on every un-cached ticket, so
+// callers must only invoke it from an explicit user action (a button
+// click), never from a page's initial data-fetch -- see
+// src/app/tickets/[id]/actions.ts.
+export interface RagSource {
+  index: number;
+  kind: SearchResultSource;
+  id: string;
+  title: string | null;
+  text: string;
+  score: number;
+}
+
+export interface SuggestedReply {
+  refused: boolean;
+  refusal_reason: string | null;
+  draft: string | null;
+  cited_indices: number[];
+  cached: boolean;
+  cost_usd: number;
+  sources: RagSource[];
+}
+
+export async function getSuggestedReply(ticketId: string): Promise<SuggestedReply> {
+  return apiFetch<SuggestedReply>(`/tickets/${ticketId}/suggested-reply`, { method: "POST" });
+}

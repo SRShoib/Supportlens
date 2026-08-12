@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { EntityHighlightedText } from "@/components/entity-highlighted-text";
 import { SentimentSparkline } from "@/components/sentiment-sparkline";
+import { SuggestedReplyPanel } from "@/components/suggested-reply-panel";
 import { ThreadSummary } from "@/components/thread-summary";
 import {
   type EntityResult,
@@ -122,6 +123,8 @@ export default async function TicketDetailPage({ params }: PageProps<"/tickets/[
           </li>
         )}
       </ol>
+
+      <SuggestedReplyPanel ticketId={ticket.id} />
     </div>
   );
 }
