@@ -28,19 +28,20 @@ GitHub, since both Railway and Vercel deploy by watching a connected repo.
    `models/`, `data/raw/`, or `.env` gets picked up, those stay
    gitignored).
 
-3. Stage, commit, and connect the remote:
+3. Stage, commit, rename the branch to `main`, connect the remote, and
+   push:
 
    ```
    git add -A
    git commit -m "feat: dashboard redesign + Railway/Vercel deployment prep"
+   git branch -M main
    git remote add origin https://github.com/<you>/<repo>.git
-   git push -u origin master
+   git push -u origin main
    ```
 
-   (This repo's current branch is `master`, not `main` — that's fine,
-   both Railway and Vercel let you pick whichever branch to deploy from
-   during setup. Renaming it is optional and not required for anything
-   below to work.)
+   (`git branch -M main` renames the current branch, currently `master`,
+   in place — safe, doesn't touch any file content, just the branch
+   label. Everything below assumes `main`.)
 
 4. Confirm: refresh the GitHub repo page, the files should all be there.
 
