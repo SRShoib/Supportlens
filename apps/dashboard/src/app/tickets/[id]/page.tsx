@@ -3,9 +3,11 @@ import { notFound } from "next/navigation";
 
 import { EntityHighlightedText } from "@/components/entity-highlighted-text";
 import { SentimentSparkline } from "@/components/sentiment-sparkline";
+import { ThreadSummary } from "@/components/thread-summary";
 import {
   type EntityResult,
   getSentimentTrajectory,
+  getThreadSummary,
   getTicket,
   type SentimentTrajectoryPayload,
   predictEntities,
@@ -36,6 +38,18 @@ async function getTrajectory(ticketId: string): Promise<SentimentTrajectoryPaylo
   }
 }
 
+// Same best-effort contract: scripts/compute_thread_summaries.py skips
+// single-message tickets entirely and may simply not have run yet against
+// this one -- getThreadSummary already returns null for that case, but the
+// API itself could still be unreachable, so this stays defensive too.
+async function getSummary(ticketId: string): Promise<string | null> {
+  try {
+    return await getThreadSummary(ticketId);
+  } catch {
+    return null;
+  }
+}
+
 export default async function TicketDetailPage({ params }: PageProps<"/tickets/[id]">) {
   const { id } = await params;
   const ticket = await getTicket(id);
@@ -43,9 +57,10 @@ export default async function TicketDetailPage({ params }: PageProps<"/tickets/[
     notFound();
   }
 
-  const [entityResults, trajectory] = await Promise.all([
+  const [entityResults, trajectory, summary] = await Promise.all([
     getMessageEntities(ticket.messages.map((message) => message.text_clean)),
     getTrajectory(ticket.id),
+    getSummary(ticket.id),
   ]);
 
   return (
@@ -63,6 +78,7 @@ export default async function TicketDetailPage({ params }: PageProps<"/tickets/[
           {ticket.brand ? ` · ${ticket.brand}` : ""}
           {ticket.created_at ? ` · ${formatDateTime(ticket.created_at)}` : ""}
         </p>
+        {summary && <ThreadSummary summary={summary} />}
         {trajectory && (
           <div className="mt-3">
             <SentimentSparkline

@@ -1,6 +1,6 @@
 COMPOSE = docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: install install-training dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency ner-data ner-paraphrase ner-gold-export ner-gold-import train-ner eval-ner sentiment-emotion-data train-baseline-sentiment train-baseline-emotion predict-sentiment eval-sentiment
+.PHONY: install install-training dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency ner-data ner-paraphrase ner-gold-export ner-gold-import train-ner eval-ner sentiment-emotion-data train-baseline-sentiment train-baseline-emotion predict-sentiment eval-sentiment summarization-data train-summarization predict-summary judge-summaries eval-summarization
 
 install:
 	uv sync
@@ -124,3 +124,18 @@ predict-sentiment:
 
 eval-sentiment:
 	uv run python scripts/generate_m5_report.py
+
+summarization-data:
+	uv run python -m ml.training.summarization_data
+
+train-summarization:
+	uv run python ml/training/train_summarization.py --config ml/training/configs/thread_summary_flan_t5_small.yaml
+
+predict-summary:
+	uv run python scripts/compute_thread_summaries.py
+
+judge-summaries:
+	uv run python -m ml.data.llm_judge_summaries
+
+eval-summarization:
+	uv run python scripts/generate_m6_report.py
