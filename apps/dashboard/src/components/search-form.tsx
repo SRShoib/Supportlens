@@ -12,6 +12,16 @@ const SOURCE_LABEL: Record<SearchResultSource, string> = {
   kb_article: "KB article",
 };
 
+// Two distinct hues, one per result source -- a real category (result kind),
+// not a magnitude, so categorical color is the right call here (dataviz
+// skill). Kept close to Search's own amber section identity for "ticket"
+// since resolved tickets are this page's primary result type; KB articles
+// get teal so the two never read as the same thing in a mixed results list.
+const SOURCE_BADGE_CLASS: Record<SearchResultSource, string> = {
+  ticket: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300",
+  kb_article: "bg-teal-50 text-teal-700 dark:bg-teal-500/10 dark:text-teal-300",
+};
+
 // Server Action modules ("use server" at the top of
 // src/app/search/actions.ts) may only export async functions -- a plain
 // object export like an initial-state constant doesn't survive that
@@ -35,21 +45,21 @@ export function SearchForm() {
           defaultValue={state.query}
           placeholder="Search resolved tickets and KB articles..."
           required
-          className="min-w-64 flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+          className="min-w-64 flex-1 rounded-xl border border-zinc-300/80 bg-white/90 px-3.5 py-2.5 text-sm text-zinc-900 shadow-sm placeholder:text-zinc-400 transition-all duration-200 focus:border-amber-400 focus:ring-4 focus:ring-amber-500/15 focus:outline-none dark:border-white/10 dark:bg-white/5 dark:text-zinc-50 dark:placeholder:text-zinc-500"
         />
         <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400">
           <input
             type="checkbox"
             name="rerank"
             defaultChecked
-            className="rounded border-zinc-300 dark:border-zinc-700"
+            className="rounded border-zinc-300 text-amber-600 focus:ring-amber-500 dark:border-zinc-700"
           />
           Rerank
         </label>
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-zinc-50 dark:text-zinc-900"
+          className="rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm shadow-amber-500/30 transition-all duration-200 hover:shadow-md hover:shadow-amber-500/40 active:scale-[0.98] disabled:opacity-50"
         >
           {pending ? "Searching…" : "Search"}
         </button>
@@ -65,13 +75,16 @@ export function SearchForm() {
       )}
 
       <ul className="mt-3 space-y-3">
-        {state.results.map((result) => (
+        {state.results.map((result, index) => (
           <li
             key={`${result.source}-${result.id}`}
-            className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950"
+            className="surface-card surface-card-interactive animate-fade-in-up p-4"
+            style={{ animationDelay: `${Math.min(index, 12) * 40}ms` }}
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${SOURCE_BADGE_CLASS[result.source]}`}
+              >
                 {SOURCE_LABEL[result.source]}
               </span>
               <span className="text-xs text-zinc-400 dark:text-zinc-500">
@@ -89,7 +102,7 @@ export function SearchForm() {
             {result.source === "ticket" && (
               <Link
                 href={`/tickets/${result.id}`}
-                className="mt-2 inline-block text-xs text-zinc-500 hover:underline dark:text-zinc-400"
+                className="mt-2 inline-block text-xs font-medium text-amber-600 hover:underline dark:text-amber-400"
               >
                 View ticket →
               </Link>

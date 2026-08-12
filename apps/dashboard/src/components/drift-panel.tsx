@@ -12,16 +12,18 @@
 import type { Drift, DriftStatus, EmbeddingDriftMetrics, PredictionDriftMetrics } from "@/lib/api";
 
 const STATUS_BADGE_CLASS: Record<DriftStatus, string> = {
-  stable: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400",
-  watch: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
-  alarm: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400",
+  stable: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400",
+  watch: "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400",
+  alarm: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400",
 };
 const STATUS_ICON: Record<DriftStatus, string> = { stable: "●", watch: "▲", alarm: "▲" };
 
 function StatusBadge({ status }: { status: DriftStatus }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASS[status]}`}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE_CLASS[status]} ${
+        status === "alarm" ? "animate-pulse-ring" : ""
+      }`}
     >
       <span aria-hidden>{STATUS_ICON[status]}</span>
       {status}
@@ -86,8 +88,8 @@ export function DriftPanel({ drift }: DriftPanelProps) {
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-        <h3 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+      <div className="surface-card surface-card-interactive p-4">
+        <h3 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">
           Real (reference week vs. live window)
         </h3>
         <p className="mt-0.5 text-xs text-zinc-400 dark:text-zinc-500">
@@ -98,8 +100,8 @@ export function DriftPanel({ drift }: DriftPanelProps) {
           <PredictionCell metrics={realPrediction ?? null} />
         </div>
       </div>
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-        <h3 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+      <div className="surface-card surface-card-interactive p-4">
+        <h3 className="text-xs font-semibold tracking-wide text-zinc-500 uppercase dark:text-zinc-400">
           Simulated (reference week vs. Bitext-injected slice)
         </h3>
         <p className="mt-0.5 text-xs text-zinc-400 dark:text-zinc-500">

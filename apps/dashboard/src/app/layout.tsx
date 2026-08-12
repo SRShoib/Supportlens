@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { Geist, Geist_Mono } from "next/font/google";
+
+import { SidebarNav } from "@/components/sidebar-nav";
+
 import "./globals.css";
 
 const geistSans = Geist({
@@ -24,32 +26,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col bg-zinc-50 dark:bg-black">
-        <header className="border-b border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="mx-auto flex max-w-4xl items-center gap-6 px-6 py-4">
-            <Link
-              href="/tickets"
-              className="text-sm font-semibold text-zinc-900 dark:text-zinc-50"
-            >
-              supportlens
-            </Link>
-            <nav className="flex gap-4 text-sm text-zinc-500 dark:text-zinc-400">
-              <Link href="/tickets" className="hover:text-zinc-900 dark:hover:text-zinc-50">
-                Tickets
-              </Link>
-              <Link href="/topics" className="hover:text-zinc-900 dark:hover:text-zinc-50">
-                Topics
-              </Link>
-              <Link href="/search" className="hover:text-zinc-900 dark:hover:text-zinc-50">
-                Search
-              </Link>
-              <Link href="/metrics" className="hover:text-zinc-900 dark:hover:text-zinc-50">
-                Metrics
-              </Link>
-            </nav>
-          </div>
-        </header>
-        <main className="flex-1">{children}</main>
+      <body className="flex min-h-full">
+        <SidebarNav />
+        <main className="min-w-0 flex-1 pt-16 md:pt-0">{children}</main>
       </body>
     </html>
   );

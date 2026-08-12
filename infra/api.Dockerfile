@@ -25,7 +25,9 @@ COPY scripts ./scripts
 COPY alembic ./alembic
 COPY alembic.ini ./alembic.ini
 COPY data/seed ./data/seed
-RUN uv sync --frozen --no-dev --no-group ml --group serving --group search
+COPY infra/api-entrypoint.sh ./api-entrypoint.sh
+RUN uv sync --frozen --no-dev --no-group ml --group serving --group search \
+    && chmod +x ./api-entrypoint.sh
 ENV PATH="/app/.venv/bin:$PATH"
 # .env's HF_HOME (./data/raw/hf, a *host*-side path for local dev) is
 # overridden to a fixed in-image location by docker-compose.yml -- baked
@@ -50,5 +52,7 @@ EXPOSE 8000
 # dev/demo database (M10: "fresh-machine clone-to-running"). Previously
 # nothing in the documented quickstart ever migrated the dev Postgres --
 # only tests/integration's testcontainers fixture did, against a disposable
-# DB (docs/decisions.md).
-CMD ["sh", "-c", "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000"]
+# DB (docs/decisions.md). api-entrypoint.sh additionally supports
+# RUN_DEMO_SEED_ON_BOOT and Render's dynamic $PORT for free-tier hosting
+# with no persistent disk -- both no-ops (unset) for local docker-compose.
+CMD ["./api-entrypoint.sh"]

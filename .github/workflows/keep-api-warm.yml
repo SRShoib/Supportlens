@@ -1,0 +1,32 @@
+# Render's free web services spin down after 15 minutes with no traffic and
+# take ~30-60s to wake back up (docs/decisions.md) -- Vercel's Hobby plan
+# kills any serverless function (including the dashboard's own Server
+# Component fetches to this API) after 10s. Stacked together, the first
+# visit after both sides go idle fails outright rather than just being
+# slow. Pinging /healthz well inside the 15-minute window keeps the API
+# always warm, so a real visitor never hits a cold start. 730 always-on
+# hours/month fits inside Render's 750 free instance-hours.
+#
+# Set the RENDER_API_URL repository variable (Settings -> Secrets and
+# variables -> Actions -> Variables) to the deployed API's base URL, e.g.
+# https://supportlens-api.onrender.com, after the first Render deploy --
+# this workflow no-ops with a clear message until that's set.
+
+name: Keep API warm
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /healthz
+        run: |
+          if [ -z "${{ vars.RENDER_API_URL }}" ]; then
+            echo "RENDER_API_URL repository variable is not set yet -- skipping (see this workflow's file header)."
+            exit 0
+          fi
+          curl --fail --max-time 90 "${{ vars.RENDER_API_URL }}/healthz"
