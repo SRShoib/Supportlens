@@ -467,3 +467,179 @@ shows up with the real corpus's actual (larger, data-driven) week count. Neither
 tests being wrong, exactly; it's the general lesson M2–M6 already priced in (SPEC §7: "qualitative
 performance on real tweets" sections exist for exactly this reason) — a synthetic fixture proves the
 logic is correct, not that it's tuned for what real data actually looks like.
+
+## 2026-08-12 — M8 "resolved tickets" defined from M5's resolution_quality, not "has an agent reply"
+
+**Decision:** `ml/data/resolved_tickets.py::resolved_ticket_ids` defines a resolved ticket as a
+`TicketSource.TWITTER` ticket whose `sentiment_trajectory` Prediction (SPEC M5,
+`ml/inference/sentiment_trajectory.py`) has `Prediction.score` (resolution_quality) strictly positive.
+**Why:** the canonical schema has no explicit resolution status anywhere (no `status` column, no loader
+ever sets one) and SPEC M8's text ("index resolved tickets") doesn't define one either. The first candidate
+— "has at least one agent message" — was measured against the real ingested corpus before being written:
+36,578 of 36,579 Twitter tickets have an agent reply (99.997%). The twcs dataset's conversation grouping is
+curated around brand-response threads, so nearly every captured ticket includes one by construction; that
+definition doesn't discriminate anything, so indexing "resolved tickets" under it would mean indexing
+essentially the whole Twitter corpus, defeating the point of a "similar *resolved* cases" retrieval corpus
+for RAG. resolution_quality > 0 does discriminate (7,677 of 36,579 Twitter tickets at the real-run scale,
+~21%) and is semantically closer to what the RAG use case needs — "show the agent an example of this kind
+of issue being resolved *well*" — since M5 already ties it to the customer's final-message sentiment
+discounted by opening urgency. Bitext is excluded entirely, same reasoning as every real-corpus module
+since M7: synthetic single-turn instruction/response pairs, no real resolution to speak of.
+**Alternatives:** `resolution_quality >= 0` (rejected — includes exact-neutral endings, ~59% of the corpus,
+too permissive to read as "resolved well"); "agent had the last message" (rejected — untested against the
+real corpus and likely close to as degenerate as the agent-reply-exists candidate, for the same structural
+reason); a brand-new heuristic independent of M5 (rejected — M5 already computed and persisted a signal
+that means almost exactly what's needed here, inventing a second one would duplicate reasoning already
+priced into `sentiment_trajectory.py`'s design, see its module docstring).
+
+## 2026-08-12 — M8 KB articles: templated, not LLM-generated; 13 of 40 hand-picked from real M7 topics
+
+**Decision:** `ml/data/kb_generate.py` generates all 40 SPEC-M8 KB articles from hardcoded, hand-authored
+`ArticleSpec` templates — 27 keyed to the real Bitext intent taxonomy (queried from Postgres:
+`Ticket.meta["intent"]` across all ingested `TicketSource.BITEXT` rows, confirmed exactly 27 distinct
+values) and 13 keyed to hand-picked entries from the real M7 `topics` table
+(`model_version="topics_bertopic_v1"`), rewritten as clean brand-agnostic prose rather than rendered
+mechanically from their raw c-TF-IDF keyword strings.
+**Why:** SPEC §5's M8 budget line ("RAG reply drafting (demo + cache warm) ≈ $1.50") is earmarked for reply
+drafting specifically; there's no separate line for writing the KB, so an LLM-generated KB would either
+overrun the module's own budget allocation or eat into the shared reserve for no clearly-scoped reason.
+Rendering the real topic catalog directly was tried conceptually and rejected once the actual topic labels
+were inspected: several of the real clusters are noise ("wtf, does, jpg, love"; "fuck, worst, suck, hate")
+or too vague to summarize ("service, customer, hold, chat") — a KB "article" auto-titled from one of those
+would read as garbage or, worse, profanity, in a portfolio demo. The 13 chosen topics are all real,
+coherent clusters (flights, gaming account issues, ride-share trips, train tickets, streaming playback,
+mobile OS updates, internet outages, package delivery, baggage, card payments, software updates, TV/channel
+access, food/store orders) — each article's `source_key`/`tags` still cite the originating `topic_key` for
+traceability, but the prose itself is hand-written, not templated from the keyword list.
+**Alternatives:** LLM-drafted articles from intent/topic names (rejected — budget, plus SPEC's own explicit
+LLM-judge/RAG-drafting budget lines suggest LLM calls are meant to be scoped narrowly, not used as a
+default tool everywhere convenient); mechanical rendering of all real M7 topics including outliers/noise
+clusters (rejected — quality, see above); Bitext-only (27 articles, short of "~40" and loses the
+real-corpus grounding story that's part of this project's overall data-strategy narrative, SPEC §2).
+
+## 2026-08-12 — M8 RAG confidence gate: cross-encoder score > 0, measured against the real corpus
+
+**Decision:** `ml/inference/rag_reply.py::MIN_CONFIDENCE = 0.0`, checked against the top retrieved source's
+**cross-encoder** score (`cross-encoder/ms-marco-MiniLM-L-6-v2`, always applied inside `draft_reply` —
+independent of whatever `rerank` flag a `/search` UI call used) — below it, the endpoint refuses before ever
+calling the LLM (SPEC M8's "no-answer behavior").
+**Why:** measured directly against the real indexed corpus (7,676 resolved tickets + 40 KB articles) rather
+than guessed: 5 realistic support queries ("my package never arrived", "how do I reset my password", "I was
+charged twice for my order", "flight got cancelled and I need a refund", "my internet has been down for 2
+days") scored their best source at cross-encoder logits `[0.93, 9.02]`; 5 clearly off-topic queries (trivia,
+small talk, gibberish — "what is the capital of France", "purple elephants dance under the moonlight", etc.)
+scored `[-11.17, -3.33]` — a wide, clean gap either side of 0. Raw dense cosine similarity was checked too
+and rejected as the gate signal: on-topic queries scored similarity 0.60–0.71, off-topic scored 0.28–0.53 —
+close enough (e.g. one off-topic query at 0.526 vs. an on-topic query at 0.604) that a clean threshold isn't
+obvious the way it is for the cross-encoder score.
+**Alternatives:** gating on dense similarity instead (rejected — the overlap above); a threshold picked
+without measurement (rejected — project rule #5's spirit: don't invent an unjustified number when the
+real corpus is sitting right there to check against, same instinct as M7's NPMI/z-score decisions).
+
+## 2026-08-12 — Bug found by real smoke test: a ticket's own text retrieved itself as a RAG source
+
+**Finding:** the first real (non-mocked) call to `POST /tickets/{id}/suggested-reply` — for a ticket about a
+password/iPhone sign-in issue — returned a draft citing 4 "similar resolved cases", but source `[1]` was the
+*exact same ticket* being drafted for. Root cause: a ticket's Chroma id in the `resolved_tickets` collection
+is its own `ticket_id` (`scripts/index_search_corpus.py`), and `suggested_reply` queries with that same
+ticket's own customer-problem text — querying with a document's own exact text against its own exact
+embedding is close to a perfect match, so it dominated the pool every time. Unit tests never caught this:
+every fixture used distinct ticket ids for "the ticket" and "the candidate sources", a distinction the real
+data doesn't preserve because there's exactly one document per ticket, and the query text passed to
+`draft_reply` always came from the very ticket being drafted for.
+**Fix:** `ml/inference/retrieval.py::retrieve` gained an `exclude_ids: frozenset[str]` parameter (default
+empty, so `apps/api/routers/search.py` — which never has anything to exclude — is unaffected);
+`ml/inference/rag_reply.py::draft_reply` takes `exclude_ticket_id` and passes it through;
+`apps/api/routers/rag.py` passes `str(ticket_id)`. Re-verified directly against the real corpus (bypassing
+the LLM call to avoid re-billing for a retrieval-only check): the same ticket's best self-excluded source
+score dropped from a self-match to genuinely different tickets, and a second real end-to-end call (different
+ticket, ~$0.0003) confirmed the drafted reply's sources no longer include the ticket itself.
+**Why this matters:** same lesson as M7's real-run entries above — a synthetic fixture proves the retrieval
+*logic* is correct, not that it's exercised the way real data actually shapes it (here: query text and one
+candidate document being derived from the exact same source object). Worth remembering for any future
+retrieval feature keyed by a document's own content.
+
+## 2026-08-12 — M8 Chroma integration tests: real server via testcontainers, pinned to the deployed version
+
+**Decision:** `tests/integration/conftest.py` adds `chroma_container` (session-scoped
+`testcontainers.community.chroma.ChromaContainer`, pinned to `chromadb/chroma:0.5.23` — testcontainers'
+own default is `1.0.0`, a different heartbeat API version than what `infra/docker-compose.yml` actually
+runs) and `chroma_store` (a real `ChromaVectorStore` against it, resetting the two router-facing collection
+names before every test — Chroma has no `TRUNCATE`, so this is delete-and-recreate instead). Both are
+gated behind `pytest.importorskip("chromadb")` since `chromadb` lives in the `search` group, not CI's
+default `--group serving` sync — every test using them skips cleanly rather than failing when it's absent,
+verified directly: re-ran the full integration suite after `uv sync --frozen --group serving` (no `search`)
+and got 8 clean skips, zero failures, matching what CI's job actually has installed.
+**Why:** Project conventions: "Integration tests use testcontainers for Postgres/Chroma" — every other M8 test
+(search router, RAG drafting) injects a fake store, which never exercises
+`ml/inference/vector_store.py`'s actual `chromadb.HttpClient` wiring at all. Real testing paid off
+immediately: the real server rejected `metadatas=[{}]` (empty dict) with `"Expected metadata to be a
+non-empty dict"` — a constraint the fake `FakeCollection` test double happily accepts and
+`scripts/index_search_corpus.py` never violates in practice (every real metadata dict has several keys),
+but would have been invisible without a real server in the loop.
+**Alternatives:** keep every M8 Chroma test on the fake store (rejected — leaves the actual HTTP client
+integration completely unverified, the same gap the project's testcontainers rule exists to close); use
+testcontainers' default `chromadb/chroma:1.0.0` image (rejected — validates a server version this project
+doesn't deploy).
+
+## 2026-08-12 — M8 embedding unit for tickets: customer-problem text, full thread in metadata
+
+**Decision:** `resolved_tickets`' embedded/matched text (`document`, what `/search`'s cosine similarity and
+highlighting both operate on) is the same customer-messages-only concatenation M7 already used
+(`scripts/compute_embeddings.py::build_documents`, reused directly). The full thread — customer *and*
+agent, in order — rides along in `metadata["thread_text"]` and is never embedded or matched against.
+**Why:** the two features need different things from the same ticket. Retrieval matches a live query
+("my package never arrived") against what a customer *asked*, so the indexed text should read like a
+question, not a resolved conversation — embedding the full thread would mean a ticket's own agent reply
+("we've refunded you") pollutes what the query is being matched against. RAG drafting is the opposite: it
+needs the agent's resolution specifically to draft from, which customer-only text doesn't have. Storing
+both once, keyed by the same ticket, avoids either feature quietly regressing the other.
+**Alternatives:** embed the full thread (rejected — agent boilerplate/resolution text would dominate match
+scoring, e.g. many resolved tickets share near-identical "please DM us" agent replies that would otherwise
+cluster unrelated issues together); two separate Chroma collections per ticket, one per embedding unit
+(rejected — doubles indexing/storage for no benefit once metadata already carries the second view for free).
+
+## 2026-08-12 — M8 retrieval eval queries: first customer message, tickets with ≥ 2 required
+
+**Decision:** `ml/data/retrieval_eval_set.py` samples 100 resolved tickets (seed 42) restricted to those
+with **at least 2** customer messages, and uses the **first** one as the query text — never the ticket's
+own full indexed document.
+**Why:** the indexed document a query needs to *find* is the concatenation of every customer message on
+that ticket (see the embedding-unit entry above). A ticket with only 1 customer message has a query
+identical to its own indexed text — a free, meaningless "hit". Requiring ≥ 2 guarantees every eval query is
+a genuine partial view of a longer document it needs to actually retrieve, not a lookup of itself.
+**Alternatives:** allow single-message tickets too (rejected — inflates hit-rate@5 with trivial identical-
+text lookups, undermining the metric's honesty); paraphrase the query text with an LLM for more realistic
+phrasing (rejected — budget: SPEC M8's line item is for reply drafting, not eval-set construction, and the
+zero-cost approach is already non-trivial per the ≥2-messages requirement above).
+
+## 2026-08-12 — M8 breaks the "apps/api never loads an embedding model" precedent, on purpose
+
+**Decision:** `infra/api.Dockerfile` syncs a new `search` dependency group (sentence-transformers +
+chromadb) alongside `serving`, and `apps/api/routers/search.py`/`rag.py` load a real embedder (and,
+depending on the request, a real cross-encoder) at request time.
+**Why:** the 2026-08-10 "Chroma boots in M0, stays unused until M8" entry already committed to this landing
+in M8; the specific mechanism is worth recording because it reverses `ml/inference/embeddings.py`'s own
+M7-era docstring claim that apps/api never loads an embedding model. That claim was true for M7 (the whole
+corpus is embedded once, offline, and only *assignments* are read back live) but can't hold for M8: dense
+retrieval on an arbitrary live query has no offline equivalent — there is no "precomputed embedding" for a
+question nobody has asked yet. Every model load stays lazily imported (`ml/inference/embeddings.py`'s
+docstring, `apps/api/routers/search.py`'s `_get_*` functions) so a deployment that never hits `/search` or
+the RAG endpoint never pays the import cost, but the *dependency*, unlike `topics`, has to ship in the image.
+**Alternatives:** none seriously considered — a live semantic search endpoint structurally requires this;
+the only real choice was making the precedent-break explicit here rather than leaving the M7 docstring's
+claim silently wrong.
+
+## 2026-08-12 — M8 budget guard: a token ceiling on top of the dollar ceiling, both required
+
+**Decision:** `ml/inference/llm_client.py::LLMClient.complete()` gained an optional `max_tokens` parameter
+(previously absent — every prior caller got an unbounded completion), and `ml/inference/rag_reply.py`
+always passes `settings.rag_max_completion_tokens` (env `RAG_MAX_COMPLETION_TOKENS`, default 400).
+**Why:** SPEC M8 explicitly asks for "a hard budget guard in code (env-configured token ceiling)" — distinct
+wording from the dollar-based `LLM_BUDGET_USD` guard `LLMClient` already had. The dollar guard stops *future*
+calls once the running total crosses a line; it does nothing to bound any single call's own completion
+length, which a token ceiling does directly and which also keeps typical suggested-reply drafts from running
+needlessly long (a support reply longer than ~400 tokens is itself a smell, not just a cost one).
+**Alternatives:** treat the existing dollar guard as satisfying SPEC's wording (rejected — different failure
+mode, and SPEC's phrase "token ceiling" is specific enough that reinterpreting it would be silently
+reinterpreting an acceptance criterion, which the project's ground rule #1 says to raise, not do quietly).

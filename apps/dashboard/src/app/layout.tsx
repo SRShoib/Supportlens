@@ -40,6 +40,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <Link href="/topics" className="hover:text-zinc-900 dark:hover:text-zinc-50">
                 Topics
               </Link>
+              <Link href="/search" className="hover:text-zinc-900 dark:hover:text-zinc-50">
+                Search
+              </Link>
             </nav>
           </div>
         </header>

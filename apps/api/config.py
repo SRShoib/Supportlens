@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     llm_budget_usd: float = 5.00
     llm_enabled: bool = False
+    # SPEC M8's "hard budget guard in code (env-configured token ceiling)"
+    # for RAG suggested-reply drafting -- a per-call cap on top of
+    # llm_budget_usd's dollar total, see ml/inference/llm_client.py.
+    rag_max_completion_tokens: int = 400
 
 
 @lru_cache
