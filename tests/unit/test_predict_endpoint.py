@@ -14,6 +14,7 @@ STUB_SENTIMENT_BASELINE_MODEL = FIXTURES / "stub_sentiment" / "model.joblib"
 STUB_SENTIMENT_TRANSFORMER_DIR = FIXTURES / "stub_transformer_sentiment"
 STUB_EMOTION_BASELINE_MODEL = FIXTURES / "stub_emotion" / "model.joblib"
 STUB_EMOTION_TRANSFORMER_DIR = FIXTURES / "stub_transformer_emotion"
+STUB_SUMMARY_TRANSFORMER_DIR = FIXTURES / "stub_transformer_thread_summary"
 
 client = TestClient(app)
 
@@ -29,13 +30,18 @@ def _use_stub_models(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(predict._BASELINE_MODEL_PATHS, "emotion", STUB_EMOTION_BASELINE_MODEL)
     monkeypatch.setitem(predict._TRANSFORMER_MODEL_DIRS, "emotion", STUB_EMOTION_TRANSFORMER_DIR)
     monkeypatch.setattr(predict, "_ENTITY_ROUTING_PATH", STUB_ENTITY_ROUTING_PATH)
+    monkeypatch.setattr(predict, "_SUMMARY_TRANSFORMER_MODEL_DIR", STUB_SUMMARY_TRANSFORMER_DIR)
     predict._get_baseline_predictor.cache_clear()
     predict._get_transformer_predictor.cache_clear()
     predict._get_hybrid_entity_predictor.cache_clear()
+    predict._get_extractive_summary_predictor.cache_clear()
+    predict._get_summarization_predictor.cache_clear()
     yield
     predict._get_baseline_predictor.cache_clear()
     predict._get_transformer_predictor.cache_clear()
     predict._get_hybrid_entity_predictor.cache_clear()
+    predict._get_extractive_summary_predictor.cache_clear()
+    predict._get_summarization_predictor.cache_clear()
 
 
 def test_predict_intent_returns_results() -> None:
@@ -306,4 +312,76 @@ def test_predict_entities_baseline_never_503s_even_when_routing_file_missing(
 
 def test_predict_entities_defaults_to_baseline_model() -> None:
     response = client.post("/predict/entities", json={"texts": ["charged $49.99 today"]})
+    assert response.status_code == 200
+
+
+def test_predict_summary_baseline_defaults_to_extractive_lead_k() -> None:
+    dialogue = (
+        "Customer: my order is late\nAgent: sorry about that\n"
+        "Customer: when will it arrive\nAgent: checking now\nCustomer: thanks"
+    )
+    response = client.post("/predict/summary", json={"texts": [dialogue]})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["results"]) == 1
+    # DEFAULT_K=4 -- the extractive baseline never 503s (no model file, same
+    # asymmetry /predict/entities has with the rules extractor).
+    assert body["results"][0]["summary"] == (
+        "Customer: my order is late Agent: sorry about that "
+        "Customer: when will it arrive Agent: checking now"
+    )
+
+
+def test_predict_summary_batches_multiple_dialogues() -> None:
+    response = client.post(
+        "/predict/summary",
+        json={"texts": ["Customer: hi\nAgent: hello", "Customer: help\nAgent: sure"]},
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["results"]) == 2
+
+
+def test_predict_summary_rejects_empty_texts_list() -> None:
+    response = client.post("/predict/summary", json={"texts": []})
+    assert response.status_code == 422
+
+
+def test_predict_summary_transformer_flag_routes_to_transformer() -> None:
+    response = client.post(
+        "/predict/summary",
+        json={
+            "texts": ["Customer: order shipped yesterday\nAgent: please help"],
+            "model": "transformer",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["results"]) == 1
+    assert isinstance(body["results"][0]["summary"], str)
+
+
+def test_predict_summary_missing_transformer_model_returns_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(predict, "_SUMMARY_TRANSFORMER_MODEL_DIR", Path("does/not/exist"))
+    predict._get_summarization_predictor.cache_clear()
+
+    response = client.post(
+        "/predict/summary", json={"texts": ["Customer: hello"], "model": "transformer"}
+    )
+
+    assert response.status_code == 503
+
+
+def test_predict_summary_baseline_never_503s_even_without_a_transformer_export(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(predict, "_SUMMARY_TRANSFORMER_MODEL_DIR", Path("does/not/exist"))
+    predict._get_summarization_predictor.cache_clear()
+
+    response = client.post("/predict/summary", json={"texts": ["Customer: hello"]})
+
     assert response.status_code == 200

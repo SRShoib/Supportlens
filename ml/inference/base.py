@@ -50,5 +50,26 @@ class EntityResult:
     truncated: bool = False
 
 
+@dataclass(frozen=True)
+class SummaryResult:
+    summary: str
+
+
+def format_dialogue(turns: list[tuple[str, str]]) -> str:
+    """Renders a ticket's message thread as one newline-joined "Speaker:
+    text" string -- the shared input contract every M6 predictor takes
+    (ml/inference/extractive_summary.py::ExtractiveSummaryPredictor and
+    ml/inference/summarization.py::SummarizationPredictor both split back on
+    "\\n" or hand the whole string to a model, never re-derive speaker turns
+    themselves). `turns` is (speaker_label, text) pairs in chronological
+    order, already resolved by the caller (e.g. "Customer"/"Agent") -- kept
+    DB-agnostic here the same way ml/inference/sentiment_trajectory.py takes
+    a plain is_customer: list[bool] instead of importing api.db.models."""
+    if not turns:
+        raise ValueError("format_dialogue requires at least one turn")
+    return "\n".join(f"{speaker}: {text}" for speaker, text in turns)
+
+
 ClassificationPredictor = Predictor[TaskResult]
 EntityPredictor = Predictor[EntityResult]
+SummaryPredictor = Predictor[SummaryResult]

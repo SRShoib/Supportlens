@@ -10,10 +10,13 @@ from api.schemas.predict import (
     EntitySpanOut,
     PredictRequest,
     PredictResponse,
+    SummaryResponse,
+    SummaryResultOut,
     TaskResultOut,
 )
-from ml.inference.base import EntityPredictor, Predictor
+from ml.inference.base import EntityPredictor, Predictor, SummaryPredictor
 from ml.inference.baseline import BaselinePredictor
+from ml.inference.extractive_summary import ExtractiveSummaryPredictor
 from ml.inference.rules_ner import RulesEntityPredictor
 
 router = APIRouter(prefix="/predict", tags=["predict"])
@@ -194,3 +197,49 @@ def predict_entities(request: PredictRequest) -> EntitiesResponse:
     docs/m4-rules-vs-model-report.md found actually wins it on the real
     gold set, computed from persisted eval runs rather than assumed."""
     return _predict_entities("entities", request)
+
+
+# Winner of scripts/generate_m6_report.py's samsum/dialogsum comparison,
+# same one-path-per-task convention _TRANSFORMER_MODEL_DIRS above follows.
+_SUMMARY_TRANSFORMER_MODEL_DIR = Path("models/transformer_thread_summary_flan-t5-small_v1/final")
+
+
+@lru_cache
+def _get_extractive_summary_predictor() -> ExtractiveSummaryPredictor:
+    return ExtractiveSummaryPredictor()
+
+
+@lru_cache
+def _get_summarization_predictor() -> SummaryPredictor:
+    # Lazy-imported, same reason as _get_transformer_predictor above: a
+    # baseline (extractive)-only deployment never needs transformers/torch
+    # installed.
+    from ml.inference.summarization import SummarizationPredictor
+
+    return SummarizationPredictor(_SUMMARY_TRANSFORMER_MODEL_DIR)
+
+
+def _get_summary_predictor(model: str) -> SummaryPredictor:
+    try:
+        if model == "transformer":
+            return _get_summarization_predictor()
+        return _get_extractive_summary_predictor()
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"{model} thread_summary model not available; run `make eval-summarization` first",
+        ) from exc
+
+
+@router.post("/summary", response_model=SummaryResponse)
+def predict_summary(request: PredictRequest) -> SummaryResponse:
+    """Each entry in `texts` is one already-formatted dialogue string per
+    ticket (ml.inference.base.format_dialogue's output, e.g. "Customer:
+    ...\\nAgent: ..."), not a single message -- unlike every other
+    /predict/* endpoint, which treats each entry in `texts` as an
+    independent unit. `model="baseline"` returns the lead-k extractive
+    summary (SPEC M6's classical baseline, CLAUDE.md rule #2); "transformer"
+    returns the fine-tuned FLAN-T5-small summary."""
+    predictor = _get_summary_predictor(request.model)
+    results = predictor.predict(request.texts)
+    return SummaryResponse(results=[SummaryResultOut(summary=r.summary) for r in results])

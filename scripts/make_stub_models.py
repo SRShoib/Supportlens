@@ -6,7 +6,8 @@ recipe (confirmed by git history: both were committed directly, no
 generator in either diff). This is that missing recipe, plus stub_ner for
 M4's TokenClassificationPredictor and stub_sentiment/stub_emotion (+ their
 transformer counterparts) for M5's /predict/sentiment and /predict/emotion
-routing tests.
+routing tests, and stub_transformer_thread_summary (a tiny
+T5ForConditionalGeneration, not a classifier) for M6's SummarizationPredictor.
 
 Run to regenerate all three fixtures in place:
   uv run python scripts/make_stub_models.py
@@ -31,13 +32,15 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.svm import LinearSVC
 from tokenizers import Tokenizer
-from tokenizers.models import WordPiece
+from tokenizers.models import WordLevel, WordPiece
 from tokenizers.pre_tokenizers import Whitespace
 from transformers import (
     BertConfig,
     BertForSequenceClassification,
     BertForTokenClassification,
     PreTrainedTokenizerFast,
+    T5Config,
+    T5ForConditionalGeneration,
 )
 
 from ml.inference.rules_ner import ENTITY_LABELS
@@ -79,6 +82,16 @@ _SPECIAL_TOKENS = ["[PAD]", "[UNK]", "[CLS]", "[SEP]"]
 _CONFIG_KEYS = (
     "hidden_size", "num_hidden_layers", "num_attention_heads", "intermediate_size",
     "max_position_embeddings", "vocab_size", "id2label", "label2id",
+)  # fmt: skip
+
+THREAD_SUMMARY_VOCAB_WORDS = [
+    "order", "shipped", "yesterday", "customer", "agent", "help", "please",
+    "refund", "account", "was", "the", "my", "is", "will", "you", "charged",
+]  # fmt: skip
+_T5_SPECIAL_TOKENS = ["<pad>", "</s>", "<unk>"]
+_SEQ2SEQ_CONFIG_KEYS = (
+    "vocab_size", "d_model", "d_ff", "num_layers", "num_decoder_layers",
+    "num_heads", "d_kv", "decoder_start_token_id", "pad_token_id", "eos_token_id",
 )  # fmt: skip
 
 
@@ -295,6 +308,52 @@ def build_stub_transformer_urgency(out_dir: Path) -> None:
     )
 
 
+def _build_t5_tokenizer(words: list[str]) -> PreTrainedTokenizerFast:
+    vocab = {token: i for i, token in enumerate(_T5_SPECIAL_TOKENS)}
+    for word in words:
+        vocab.setdefault(word, len(vocab))
+    tokenizer = Tokenizer(WordLevel(vocab=vocab, unk_token="<unk>"))
+    tokenizer.pre_tokenizer = Whitespace()
+    return PreTrainedTokenizerFast(
+        tokenizer_object=tokenizer, unk_token="<unk>", pad_token="<pad>", eos_token="</s>"
+    )
+
+
+def _tiny_t5_config(vocab_size: int) -> T5Config:
+    return T5Config(
+        vocab_size=vocab_size,
+        d_model=16,
+        d_ff=32,
+        num_layers=1,
+        num_decoder_layers=1,
+        num_heads=2,
+        d_kv=8,
+        # T5 convention: the decoder is seeded with pad_token_id, not a
+        # dedicated <bos> -- there isn't one in T5's vocabulary.
+        decoder_start_token_id=0,
+        pad_token_id=0,
+        eos_token_id=1,
+    )
+
+
+def build_stub_transformer_thread_summary(out_dir: Path) -> None:
+    """T5ForConditionalGeneration -- no label_map.json, unlike every other
+    stub_transformer_* fixture: summarization output is free text, not a
+    fixed label set. WordLevel (not WordPiece) vocab: T5's real tokenizer is
+    SentencePiece unigram, but WordLevel exercises the same encode/generate/
+    decode plumbing ml/inference/summarization.py's SummarizationPredictor
+    uses without needing a real .model binary."""
+    torch.manual_seed(SEED)
+    tokenizer = _build_t5_tokenizer(THREAD_SUMMARY_VOCAB_WORDS)
+    config = _tiny_t5_config(vocab_size=tokenizer.vocab_size)
+    model = T5ForConditionalGeneration(config)
+    model.eval()
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    model.save_pretrained(out_dir)
+    tokenizer.save_pretrained(out_dir)
+
+
 def build_all(fixtures_dir: Path) -> None:
     build_stub_intent(fixtures_dir / "stub_intent")
     build_stub_transformer_intent(fixtures_dir / "stub_transformer_intent")
@@ -304,6 +363,7 @@ def build_all(fixtures_dir: Path) -> None:
     build_stub_emotion(fixtures_dir / "stub_emotion")
     build_stub_transformer_emotion(fixtures_dir / "stub_transformer_emotion")
     build_stub_transformer_urgency(fixtures_dir / "stub_transformer_urgency")
+    build_stub_transformer_thread_summary(fixtures_dir / "stub_transformer_thread_summary")
 
 
 def _load_json(path: Path) -> dict[str, object]:
@@ -328,6 +388,28 @@ def _check_hf_stub(name: str, committed_dir: Path, regenerated_dir: Path) -> lis
     regenerated_label_map = _load_json(regenerated_dir / "label_map.json")
     if committed_label_map != regenerated_label_map:
         problems.append(f"{name}: label_map.json differs")
+
+    committed_vocab = _load_json(committed_dir / "tokenizer.json")["model"]["vocab"]  # type: ignore[index]
+    regenerated_vocab = _load_json(regenerated_dir / "tokenizer.json")["model"]["vocab"]  # type: ignore[index]
+    if committed_vocab != regenerated_vocab:
+        problems.append(f"{name}: tokenizer vocab differs")
+
+    return problems
+
+
+def _check_seq2seq_stub(name: str, committed_dir: Path, regenerated_dir: Path) -> list[str]:
+    problems: list[str] = []
+    if not (committed_dir / "config.json").exists():
+        return [f"{name}: no committed fixture at {committed_dir}"]
+
+    committed_config = _load_json(committed_dir / "config.json")
+    regenerated_config = _load_json(regenerated_dir / "config.json")
+    for key in _SEQ2SEQ_CONFIG_KEYS:
+        if committed_config.get(key) != regenerated_config.get(key):
+            problems.append(
+                f"{name}: config.json[{key}] committed={committed_config.get(key)!r} "
+                f"regenerated={regenerated_config.get(key)!r}"
+            )
 
     committed_vocab = _load_json(committed_dir / "tokenizer.json")["model"]["vocab"]  # type: ignore[index]
     regenerated_vocab = _load_json(regenerated_dir / "tokenizer.json")["model"]["vocab"]  # type: ignore[index]
@@ -386,6 +468,11 @@ def run_check(fixtures_dir: Path) -> bool:
                 fixtures_dir / "stub_transformer_urgency",
                 tmp_dir / "stub_transformer_urgency",
             ),
+            *_check_seq2seq_stub(
+                "stub_transformer_thread_summary",
+                fixtures_dir / "stub_transformer_thread_summary",
+                tmp_dir / "stub_transformer_thread_summary",
+            ),
         ]
 
     if problems:
@@ -414,7 +501,8 @@ def main() -> None:
     print(
         "wrote stub_intent, stub_transformer_intent, stub_ner, stub_sentiment, "
         "stub_transformer_sentiment, stub_emotion, stub_transformer_emotion, "
-        f"stub_transformer_urgency -> {FIXTURES_DIR}"
+        "stub_transformer_urgency, stub_transformer_thread_summary "
+        f"-> {FIXTURES_DIR}"
     )
 
 
