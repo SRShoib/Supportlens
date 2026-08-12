@@ -45,9 +45,25 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yaml
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
+
+from ml.data.masking import MaskToken
 
 TOP_N_WORDS = 10  # matches ml/evaluation/topic_metrics.py's TOP_N_TERMS
 MODELS_DIR = Path("models")
+
+# A CountVectorizer/TfidfVectorizer's default tokenizer strips punctuation
+# before counting, which collapses ml/data/masking.py's <USER>/<URL>/<EMAIL>/
+# <PHONE> tokens down to bare "user"/"url"/"email"/"phone" -- words that then
+# alias with any organic English usage and, worse, are near-universal across
+# the corpus (almost every ticket mentions the brand's @handle or a URL), so
+# without this they dominate nearly every topic's keywords instead of being
+# suppressed the way a true common-to-every-cluster term should be. Derived
+# from MaskToken directly (not hardcoded) so this can't drift if the mask
+# vocabulary changes.
+TOPIC_STOP_WORDS: frozenset[str] = frozenset(ENGLISH_STOP_WORDS) | {
+    token.value.strip("<>").lower() for token in MaskToken
+}
 
 
 @dataclass
@@ -100,7 +116,7 @@ def _ctfidf_keywords(
         return []
 
     pseudo_corpus = [" ".join(member_docs), " ".join(documents)]
-    vectorizer = TfidfVectorizer(max_features=20_000, stop_words="english", min_df=1)
+    vectorizer = TfidfVectorizer(max_features=20_000, stop_words=list(TOPIC_STOP_WORDS), min_df=1)
     tfidf = vectorizer.fit_transform(pseudo_corpus)
     vocab = np.array(vectorizer.get_feature_names_out())
     cluster_scores = np.asarray(tfidf[0].todense()).ravel()
@@ -134,6 +150,7 @@ def fit_bertopic(
     # module's docstring and pyproject.toml.
     from bertopic import BERTopic
     from hdbscan import HDBSCAN
+    from sklearn.feature_extraction.text import CountVectorizer
     from umap import UMAP
 
     umap_model = UMAP(
@@ -153,6 +170,7 @@ def fit_bertopic(
     topic_model = BERTopic(
         umap_model=umap_model,
         hdbscan_model=hdbscan_model,
+        vectorizer_model=CountVectorizer(stop_words=list(TOPIC_STOP_WORDS)),
         top_n_words=TOP_N_WORDS,
         calculate_probabilities=False,
     )
