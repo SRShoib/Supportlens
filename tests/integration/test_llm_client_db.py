@@ -49,6 +49,28 @@ def test_spend_accumulates_across_distinct_prompts(db_session: Session) -> None:
     assert openai_client.chat.completions.create.call_count == 2
 
 
+def test_max_tokens_is_forwarded_to_the_openai_call(db_session: Session) -> None:
+    openai_client = MagicMock()
+    openai_client.chat.completions.create.return_value = _mock_response("short reply")
+    client = LLMClient(db_session, _settings(), openai_client)
+
+    client.complete(purpose="rag_reply_draft", prompt="draft a reply", max_tokens=400)
+
+    _, kwargs = openai_client.chat.completions.create.call_args
+    assert kwargs["max_tokens"] == 400
+
+
+def test_max_tokens_defaults_to_none_when_not_passed(db_session: Session) -> None:
+    openai_client = MagicMock()
+    openai_client.chat.completions.create.return_value = _mock_response("short reply")
+    client = LLMClient(db_session, _settings(), openai_client)
+
+    client.complete(purpose="urgency_llm_seed", prompt="classify this")
+
+    _, kwargs = openai_client.chat.completions.create.call_args
+    assert kwargs["max_tokens"] is None
+
+
 def test_budget_exceeded_raises_and_stops_further_calls(db_session: Session) -> None:
     openai_client = MagicMock()
     openai_client.chat.completions.create.return_value = _mock_response(

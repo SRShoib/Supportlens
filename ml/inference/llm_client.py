@@ -52,7 +52,13 @@ class LLMClient:
     re-billing — and the persisted spend counter (SUM(cost_usd)) is checked
     before every *new* call, hard-stopping at `settings.llm_budget_usd`.
     Refuses to do anything at all while `LLM_ENABLED` is false, which is the
-    default until a human explicitly opts in."""
+    default until a human explicitly opts in. `complete()`'s optional
+    `max_tokens` is a second, per-call ceiling on top of the dollar budget
+    (SPEC M8: "hard budget guard in code (env-configured token ceiling)") --
+    callers that want it pass their own env-configured value through (see
+    ml/inference/rag_reply.py's `RAG_MAX_COMPLETION_TOKENS`); this class
+    doesn't impose a default itself, `None` (unbounded) matches every
+    caller's behavior before this parameter existed."""
 
     def __init__(
         self,
@@ -79,7 +85,14 @@ class LLMClient:
         )
         return self._session.scalars(stmt).first()
 
-    def complete(self, *, purpose: str, prompt: str, system: str | None = None) -> LLMCallResult:
+    def complete(
+        self,
+        *,
+        purpose: str,
+        prompt: str,
+        system: str | None = None,
+        max_tokens: int | None = None,
+    ) -> LLMCallResult:
         if not self._settings.llm_enabled:
             raise LLMDisabledError(
                 "LLM_ENABLED is false; refusing to call a paid API. Set it in .env to proceed."
@@ -106,6 +119,7 @@ class LLMClient:
             model=MODEL,
             messages=messages,  # type: ignore[arg-type]
             temperature=0,
+            max_tokens=max_tokens,
         )
         text = response.choices[0].message.content or ""
         usage = response.usage
