@@ -97,6 +97,23 @@ topics = [
     "umap-learn>=0.5",
     "hdbscan>=0.8.40",
 ]
+# M8's live semantic search + RAG reply drafting. Unlike `topics`, this DOES
+# enter infra/api.Dockerfile and CI: dense retrieval on an arbitrary live
+# query can't be precomputed offline the way M7's corpus embedding was, so
+# apps/api has to load an embedder (query encoding) and a cross-encoder
+# (rerank) at request time -- a deliberate break from the "apps/api never
+# loads an embedding model" rule M7 documented, see docs/decisions.md.
+# sentence-transformers is listed again here (already in `topics`) rather
+# than deduped into a shared group, matching how `serving` and `training`
+# each already list transformers/sentencepiece/protobuf independently --
+# groups here track *what loads a model at runtime in this deployment
+# context*, not "avoid repeating a package name". `chromadb` is pinned to
+# match infra/docker-compose.yml's `chromadb/chroma:0.5.23` server image
+# exactly (client/server API compatibility, not just a lower bound).
+search = [
+    "sentence-transformers>=3.2",
+    "chromadb==0.5.23",
+]
 
 [tool.uv]
 default-groups = ["ml", "dev"]
@@ -156,6 +173,7 @@ module = [
     "bertopic.*",
     "umap.*",
     "hdbscan.*",
+    "chromadb.*",
 ]
 ignore_missing_imports = true
 
