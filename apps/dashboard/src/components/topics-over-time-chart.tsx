@@ -185,8 +185,9 @@ export function TopicsOverTimeChart({ weeks, series }: TopicsOverTimeChartProps)
                     className={`${fillClass} stroke-white dark:stroke-zinc-950`}
                   >
                     <title>
-                      {`${s.label} · ${formatWeek(c.week)}: ${c.point?.count ?? 0} tickets`}
-                      {c.point?.is_emerging ? " · emerging issue (z > 2)" : ""}
+                      {`${s.label} · ${formatWeek(c.week)}: ${c.point?.count ?? 0} tickets${
+                        c.point?.is_emerging ? " · emerging issue (z > 2)" : ""
+                      }`}
                     </title>
                   </circle>
                 </g>

@@ -2,7 +2,7 @@ import uuid
 
 from api.db.models import AuthorRole, Message, Ticket, TicketSource
 
-from scripts.compute_embeddings import build_documents
+from ml.data.documents import build_documents
 
 
 def _ticket(texts_and_roles: list[tuple[str, AuthorRole]]) -> Ticket:

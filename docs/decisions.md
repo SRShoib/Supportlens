@@ -792,3 +792,108 @@ and RSC data is already server-fetched once at request time); SVG for the confus
 HTML table (rejected — the skill's own principle plus M7's topics-over-time-chart.tsx precedent both favor
 SVG for continuous/positional charts, but a matrix is inherently tabular data with a real column/row
 structure a `<table>` expresses directly).
+
+## 2026-08-12 — M10 demo path: baseline-only live, a curated Postgres+Chroma seed, zero host Python needed
+
+**Decision:** the M10 zero-setup quickstart is exactly three commands (`git clone ... && cd supportlens`,
+`cp .env.example .env`, `make demo`) and needs only Docker + `make` + `git` on the host — no local Python/uv
+setup. `make demo` = `up` (build + wait-healthy) + `docker compose exec api python -m ml.data.seed_demo`.
+The seed itself is a new, git-committed dataset (`data/seed/*.jsonl`, ~1.4MB total) distinct from
+`ml/data/cli.py`'s existing 18-row test fixture (left untouched): ~339 tickets curated by
+`scripts/export_demo_seed.py` (dev-only, run once against the real corpus) — up to 5 per Bitext intent (27
+intents), plus a Twitter sample from the corpus's real dense high-volume weeks biased toward
+already-resolved/-summarized tickets, plus a deliberate oversample of topic 9's real spike week. Their
+already-computed `sentiment_trajectory`/`thread_summary`/`topic` Predictions, the full `Topic` catalog, all
+40 KB articles, and the current `eval_runs` table travel with them. `ml/data/seed_demo.py` loads all of it
+(idempotent, `ON CONFLICT DO NOTHING` on stable ids) and rebuilds the two M8 Chroma collections from
+whatever's now in Postgres.
+**Live model weights:** per the user's explicit choice, only the four classical baselines
+(`baseline_{intent,urgency,sentiment,emotion}_v1`, <4MB each) are committed to git (a `.gitignore` exception
+carved out for exactly those four `.joblib` files — every transformer `final/`/`checkpoints/` dir stays
+gitignored) and serve live by default. The baseline-vs-transformer comparison story itself is told in full
+by the already-committed `docs/m3` through `docs/m9` reports, model cards, and `/metrics` screenshots — real
+numbers, just not live-clickable transformer inference unless a transformer is trained locally or its
+export dropped into `models/` by hand (already a read-only bind mount, no code change needed).
+**Why a curated Postgres+Chroma seed rather than shipping the full ~150k-message working slice or gating
+the demo behind an external data/model host:** the full slice is hundreds of MB, too large to commit
+directly (CLAUDE.md: "committed data limited to small fixtures"); no git remote or HF token is configured
+for this project yet (the user's explicit call — see the M10 planning discussion), so external hosting
+wasn't an option this pass regardless. A curated ~300-400 row seed, small enough to commit outright, was the
+only path that didn't require either.
+**Emerging-issue preservation:** `apps/api/routers/topics.py::_compute_topic_volume` was queried directly
+against the real corpus to find an actual firing emerging-issue (topic 9, "package, delivery, delivered,
+packages", spikes z=3.09 on `2017-11-27`, count=89, share 3.4%). `export_demo_seed.py` deliberately
+oversamples that topic in that week (30 tickets) relative to a handful in four other weeks (6 each) —
+disproportionate to its true ~3.4% share, but the point is demonstrating the real detector firing on real
+underlying content, not preserving the exact real-world magnitude at 100x-plus downsampling. Verified
+directly against `ml.evaluation.trend_metrics.compute_topic_trends` on the exported seed before wiring up
+the loader: `is_emerging=True` on the intended (topic, week) — confirmed again against the live seeded
+demo, where it fires alongside one incidental second alarm (topic 0, a side effect of the general random
+sample, not engineered).
+**Alternatives:** Hugging Face Hub / GitHub Releases / Git LFS for the transformer weights, and shipping the
+full working slice (all considered and rejected in the M10 planning discussion — every option needs either
+external credentials this project doesn't have configured, or permanently bloats the git repo); a `pg_dump`
+based seed instead of application-level JSONL fixtures (rejected — schema-coupled and fragile across
+migrations, where JSONL + `CanonicalTicket`/`persist_tickets` reuses M1's already-idempotent loader
+plumbing untouched).
+
+## 2026-08-12 — Three real bugs found by actually running `docker compose up`, never previously exercised end-to-end
+
+**Finding:** M10's fresh-machine validation is the first time this project's full `docker compose up` stack
+(api + dashboard, not just `postgres`+`chroma` under `make dev`) was ever actually run and clicked through.
+It surfaced three real, previously-latent bugs, all invisible under the `make dev` workflow (host-side
+`uvicorn`, host's own populated caches/localhost) that every prior module's own testing actually used:
+
+1. **The dev Postgres was never migrated by the documented quickstart.** Nothing before this ran
+   `alembic upgrade head` against it — only `tests/integration`'s testcontainers fixture, against a
+   disposable DB. Fixed: `infra/api.Dockerfile`'s `CMD` now runs `alembic upgrade head` before `uvicorn`
+   (idempotent, a no-op once at head).
+2. **`CHROMA_HOST`/`CHROMA_PORT` in `.env` are host-side values** (`localhost:8001`, for `make dev`'s
+   host-side uvicorn) that silently don't resolve inside the `api` container (`localhost` there is the
+   container itself, not the `chroma` service) — M8's live search/RAG endpoints would have quietly failed
+   under `docker compose up` specifically. Fixed: `infra/docker-compose.yml`'s `api.environment` now
+   overrides `CHROMA_HOST=chroma`/`CHROMA_PORT=8000` (its internal compose-network address), same pattern
+   `DATABASE_URL` already used.
+3. **`apps/api/routers/rag.py` imported `build_documents` straight from `scripts.compute_embeddings`** at
+   module level — every other heavy dependency in that exact file is lazily imported, but this one dragged
+   `pandas` (an `ml`-group-only dependency, deliberately excluded from the API image) into the API's import
+   graph, crashing the container on startup outright the moment anything imported `apps.api.main`. Fixed by
+   extracting `build_documents`/`_customer_document` into a new `ml/data/documents.py` with zero heavy
+   dependencies (only `api.db.models`), updating `scripts/compute_embeddings.py`,
+   `scripts/index_search_corpus.py`, and `apps/api/routers/rag.py` to import from there. This also unblocked
+   `ml/data/seed_demo.py`'s own lazy import of `scripts.index_search_corpus` (same transitive-pandas problem
+   would otherwise have broken the seed step's Chroma-indexing stage too).
+4. **The sentence-transformers embedder/reranker had nowhere to write their Hugging Face cache.** The API
+   container runs as a non-root `app` user with no write access under `/app`, and nothing had ever needed to
+   *download* a model at runtime before (M3-M6's transformer exports load from a local `models/` bind mount,
+   never from the Hub). The first real seed/search/RAG call crashed on `PermissionError` trying to create
+   `HF_HOME`. Fixed: both models (`all-MiniLM-L6-v2`, `ms-marco-MiniLM-L-6-v2`) are now baked into the image
+   at build time (`infra/api.Dockerfile`, `chown`'d to the `app` user), `HF_HOME` pinned to that location in
+   both the Dockerfile and `docker-compose.yml` (overriding `.env`'s host-side path), so no runtime
+   network/write dependency remains at all.
+
+**Why this matters:** same lesson this project has hit repeatedly since M7 (real-scale/real-integration runs
+surface bugs synthetic fixtures and host-side dev workflows structurally can't) — CI's default sync
+(`--group serving`, not `search`) and every prior module's own manual testing never actually exercised
+`docker compose up`'s api+dashboard services together against real data. All four were caught by running
+the actual isolated fresh-clone-style stack (`docker compose -p supportlens-test`, separate ports, separate
+volumes, never touching the real dev stack) and clicking through every capability, not by reasoning about
+the Docker config in the abstract.
+
+## 2026-08-12 — A second, unrelated bug found the same way: an SVG `<title>`'s split JSX children
+
+**Finding:** the same end-to-end Docker pass also surfaced a React hydration error (#418) on `/topics`,
+specific to `topics-over-time-chart.tsx`'s per-point `<title>` tooltip, which had a template-literal
+expression and a separate conditional-string expression as two sibling JSX children
+(`{`...`}{condition ? " · emerging issue" : ""}`) — the empty-string branch renders inconsistently between
+the initial SSR HTML and the RSC hydration payload for this SVG element specifically. Root-caused by
+comparing a `next dev`-mode non-minified hydration diff (pointed at the same seeded backend) against the
+minified production error from the Docker build. Fixed by collapsing both expressions into one template
+literal (`` `${...}${condition ? "..." : ""}` ``) so there's exactly one child text node — a strictly safer
+pattern regardless of the exact React/Turbopack mechanics behind the original mismatch. Re-verified with a
+Playwright sweep across all five main pages (tickets, ticket detail, topics, search, metrics) against the
+real production Docker build: zero console/page errors.
+**Why this matters:** unrelated to the M9 work that introduced this component, but only surfaces under a
+real production build + real hydration (never manifested under `pnpm dev` on the host, which is how every
+M7-M9 dashboard screenshot in this project was taken) — another instance of the same "docker compose up was
+never actually run end-to-end" gap this module exists to close.
