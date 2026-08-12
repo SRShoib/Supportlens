@@ -1,0 +1,9 @@
+embeddings_path: data/embeddings/tickets_minilm_v1.npy
+documents_path: data/embeddings/tickets_minilm_v1.parquet
+umap_n_neighbors: 15
+umap_n_components: 5
+umap_min_dist: 0.0
+hdbscan_min_cluster_size: 75
+hdbscan_min_samples: 10
+kmeans_n_clusters: 40
+seed: 42

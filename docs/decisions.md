@@ -328,3 +328,142 @@ which has the identical unguarded-reinsert pattern (no check for "is this messag
 adding a Prediction) — this bug is latent there too, just never triggered because M2's seed-labeling was
 always run as one single batch, never a small dry run followed by a larger one. Worth revisiting if
 `llm_seed_labels.py` is ever re-run incrementally.
+
+## 2026-08-12 — M7 scope: Twitter-only corpus, customer-messages-only embedding unit
+
+**Decision:** `scripts/compute_embeddings.py` embeds `TicketSource.TWITTER` tickets only, one document per
+ticket built from the concatenation of that ticket's **customer** messages (`text_clean`, chronological),
+never Bitext and never agent replies.
+**Why:** Bitext's `created_at` is permanently `NULL` (synthetic, single-turn, no timestamp column at all —
+see the 2026-08-10 loader entries), so it can never appear on the weekly trend axis SPEC M7 also asks for;
+mixing it in would give ~42% of "topics" no time dimension. Agent replies are template-heavy ("sorry to hear
+that, please DM us") and would otherwise dominate every cluster's c-TF-IDF terms — the customer's own words
+are what actually describe the issue, same instinct as `ml/inference/sentiment_trajectory.py`'s "final
+customer message" and the urgency split's "first customer message".
+**Alternatives:** embedding the full thread (rejected — agent boilerplate pollutes topic terms); embedding
+both sources with Bitext tickets bucketed into an "unknown" trend week (rejected — makes the weekly chart
+misleading for no real benefit, since Bitext was never meant to represent real-world timing anyway).
+
+## 2026-08-12 — M7 gets a classical baseline SPEC's text doesn't ask for
+
+**Decision:** `ml/training/topic_model.py` fits a TF-IDF-labeled MiniBatchKMeans baseline (fixed
+`kmeans_n_clusters`, no outlier cluster) alongside BERTopic, from the same embeddings and c-TF-IDF labeling
+step, and `scripts/generate_m7_report.py` compares them on NPMI coherence.
+**Why:** SPEC M7's module text names only BERTopic, but project ground rule #2 ("baselines before
+transformers, always — the comparison IS the deliverable") and SPEC §1 principle #1 apply to every learned
+component, and every other module (M2–M6) shipped one. Skipping it here would make M7 the only module
+without a baseline-vs-learned story. sklearn is already a default dependency, so this costs no new packages.
+**Alternatives:** LDA instead of KMeans (more conventional for topic modeling, but slower to fit on ~36k docs
+and typically scores worse on coherence); no baseline at all, following SPEC's literal wording (rejected —
+breaks the project-wide rule for a one-off exception SPEC never actually argued for).
+
+## 2026-08-12 — M7 "coherent" made measurable: NPMI, no hardcoded threshold
+
+**Decision:** `ml/evaluation/topic_metrics.py` computes NPMI (normalized pointwise mutual information,
+Lau/Newman/Baldwin 2014) over each topic's top-10 c-TF-IDF terms, from the corpus's own document
+co-occurrence counts — no gensim, no reference corpus. `scripts/generate_m7_report.py` reports mean NPMI per
+variant as evidence; the SPEC acceptance bar itself stays literal (≥ 30 topics, HDBSCAN's `-1` outlier
+cluster never counted toward it).
+**Why:** Project rule #5 ("no metric without an eval run") means "coherent" has to become a number, but
+SPEC M7 never defines one or a pass/fail threshold — inventing a threshold SPEC never set would be a bigger
+overreach than reporting the metric and leaving the bar exactly as written.
+**Alternatives:** a hand-picked NPMI threshold for "coherent" (rejected — arbitrary, no SPEC basis); UMass
+coherence (rejected — needs a reference corpus's document frequencies at a specific window size, more
+machinery for a portfolio project than NPMI's plain co-occurrence-count version).
+
+## 2026-08-12 — M7 trend detection: a dense analysis window, and z-scores on volume *share*
+
+**Decision:** `ml/evaluation/trend_metrics.py`'s `select_dense_window` first drops week buckets under 10% of
+the median non-empty week's volume and keeps only the longest contiguous run; `compute_topic_trends` then
+computes each topic's weekly *share* of total volume (not raw count) and flags `share z-score > 2` with a
+leave-one-out mean/stdev (excludes the week being scored, so one huge spike can't inflate its own stdev and
+suppress its own z-score) plus two hard gates: `MIN_HISTORY_WEEKS = 4` (skip, don't flag, on thin history)
+and `MIN_SPIKE_TICKETS = 5` (blocks the `0,0,0,1`-style degenerate case where a flat-zero history's stdev is
+effectively 0 and one single ticket would otherwise register an enormous z-score).
+**Why:** the real twcs corpus spans 2008-05 to 2017-12 but is 99.6% concentrated in ~10 weeks of late 2017 —
+naive `date_trunc('week', ...)` over the whole range produces ~480 near-empty buckets that make any z-score
+meaningless. Raw-count z-scores are also confounded by total-volume swings: if every topic's ticket count
+rises together (the whole queue got busier), that's not one topic "emerging" — scoring on share isolates the
+signal SPEC M7 actually asks for.
+**Alternatives:** a fixed calendar window (rejected — arbitrary, doesn't adapt to where the corpus's data
+actually is); raw-count z-scores (rejected — the global-volume confound above); population stdev instead of
+leave-one-out (rejected — lets a spike's own week suppress its own z-score, the opposite of what "flag the
+spike" needs).
+
+## 2026-08-12 — M7 embeddings stay a local artifact; the `topics` dependency group is offline-only
+
+**Decision:** `scripts/compute_embeddings.py` writes `data/embeddings/tickets_minilm_v1.{npy,parquet}`
+(gitignored, like `data/splits/`) — no Chroma client is added in M7. `sentence-transformers`, `bertopic`,
+`umap-learn`, and `hdbscan` all live in one new `topics` dependency group, excluded from `default-groups`
+exactly like `training`; every module that imports them (`ml/inference/embeddings.py`,
+`ml/training/topic_model.py`'s `fit_bertopic`) is lazily imported from inside the scripts that need it
+(`scripts/compute_embeddings.py`, `ml/training/topic_model.py`), never at a module top level that
+`apps/api` or a default `pytest` run could reach.
+**Why:** the 2026-08-10 "Chroma boots in M0, stays unused until M8" entry already commits to Chroma's
+client/application code landing in M8, not earlier; M7 pulling it forward would contradict that decision for
+no real benefit, since M8's collection shape (message-level vs ticket-level, resolved-only filtering, KB
+articles too) is different enough from M7's needs that little would actually be reused. Keeping `apps/api`
+and CI's default `uv sync` free of BERTopic/UMAP/HDBSCAN/sentence-transformers also means
+`ml/evaluation/trend_metrics.py` and `topic_metrics.py` — the two modules the acceptance-critical "fires on
+an injected spike" test targets — stay testable without that group installed at all.
+**Alternatives:** write embeddings to Chroma now so M8 only adds search/rerank (rejected — pulls the
+vector-store integration risk forward into M7, and contradicts the committed decision-log entry above).
+
+## 2026-08-12 — A `psutil` install in this venv was silently a stub, broke MiniBatchKMeans
+
+**Finding:** `sklearn.cluster.MiniBatchKMeans.fit_predict` crashed with `AttributeError: module 'psutil' has
+no attribute 'Process'` (raised deep inside joblib's loky backend, `_cpu_count_affinity`) while unit-testing
+`ml/training/topic_model.py`'s KMeans baseline. `uv pip show psutil` reported version 7.2.2 installed, but
+`import psutil; psutil.__file__` was `None` — an empty namespace package, not the real library.
+**Fix:** `uv pip install --reinstall psutil` — uv reported `Failed to uninstall package at
+...psutil-7.2.2.dist-info due to missing RECORD file`, confirming the prior install was already corrupted,
+not merely stale. Same failure class as the safetensors/torch corruption entries above (a partially-written
+package left behind by an earlier `uv sync`/reinstall cycle on this machine), just surfacing in a different
+package this time.
+**Why this matters:** `psutil` isn't a direct dependency of anything in `pyproject.toml` — it's pulled in
+transitively (`accelerate`, per the 2026-08-11 entries), so a broken copy is invisible until something deep
+in a dependency's dependency actually calls into it. Worth a quick `uv pip show <pkg>` + import sanity check
+on this machine after any `uv sync` if an unrelated-looking `AttributeError`/`ImportError` shows up mid-run.
+
+## 2026-08-12 — The real M7 run, and two real bugs found and fixed in the process
+
+**What happened:** the real pipeline landed on the full ~36.6k-ticket Twitter slice —
+`make embed-tickets` → `ml/training/topic_model.py` → `scripts/assign_topics.py` →
+`scripts/generate_m7_report.py`, all on CPU. BERTopic discovered 54 topics (10,132-ticket outlier
+cluster) against SPEC M7's ≥ 30 bar; KMeans's fixed `kmeans_n_clusters=40`.
+
+**Bug 1 — masking-token artifacts and unfiltered stopwords in c-TF-IDF keywords:** the first render
+of `docs/m7-comparison-report.md` showed top topics like `"user, url, the, in"` and
+`"user, emoji, url, face_with_tears_of_joy"` — not human-readable labels (SPEC M7's explicit
+requirement). Root cause: a `TfidfVectorizer`/`CountVectorizer`'s default tokenizer strips
+punctuation before counting, collapsing `ml/data/masking.py`'s `<USER>`/`<URL>`/`<EMAIL>`/`<PHONE>`
+tokens into bare `"user"`/`"url"`/... — words that then alias with organic English usage and are
+near-universal across the corpus (almost every ticket mentions the brand's @handle or a URL), so
+instead of being suppressed the way a true common-to-every-cluster term should be, they dominated
+nearly every topic. Separately, `fit_bertopic`'s `BERTopic(...)` call never configured a
+`vectorizer_model`, so — unlike the KMeans baseline's `_ctfidf_keywords`, which already passed
+`stop_words="english"` — BERTopic's own labels had no stopword filtering at all (`"the"`, `"in"`,
+`"you"`, `"of"` shown as top terms).
+**Fix:** `ml/training/topic_model.py:TOPIC_STOP_WORDS` — sklearn's English stopword list unioned with
+the mask tokens' bracket-stripped, lowercased forms (derived from `MaskToken` directly, not
+hardcoded, so it can't drift from `ml/data/masking.py`) — passed to both vectorizers. Real effect:
+BERTopic's top topic went from `"user, url, the, in"` (5,347 tickets) to `"food, store, just,
+chicken"`; mean NPMI rose from 0.1687 to 0.2259 (KMeans: 0.1072 → 0.1425). Covered by a regression
+test (`tests/unit/test_topic_model.py::test_ctfidf_keywords_filters_masking_tokens_and_english_stopwords`)
+built from realistic masked-text input.
+**Bug 2 — chart x-axis label overlap:** `topics-over-time-chart.tsx` rendered one `<text>` per week,
+built and browser-verified against a synthetic 6-week fixture during development. The real corpus's
+dense analysis window (`select_dense_window`, data-driven, not a fixed guess) turned out to be 78
+weeks — every label overlapped into unreadable noise. Fixed by capping to at most 9 evenly-spaced
+labels regardless of week count; re-verified in a browser against the real 78-week dataset, light and
+dark.
+**Also cleaned up:** re-running `scripts/generate_m7_report.py` after the c-TF-IDF fix left 2 stale
+pre-fix `EvalRun` rows (task="topics", the 0.1072/0.1687 NPMI numbers) alongside the 2 correct ones —
+`persist_eval_run` always inserts, it doesn't upsert, same as every other M-report script. Deleted the
+stale pair directly from Postgres, same remediation as the M6 duplicate-judging entry above.
+**Why this matters:** both bugs were invisible against synthetic test fixtures — the masking-token
+collapse only shows up with real masked text at real corpus frequency, and the label overlap only
+shows up with the real corpus's actual (larger, data-driven) week count. Neither is a gap in the unit
+tests being wrong, exactly; it's the general lesson M2–M6 already priced in (SPEC §7: "qualitative
+performance on real tweets" sections exist for exactly this reason) — a synthetic fixture proves the
+logic is correct, not that it's tuned for what real data actually looks like.
