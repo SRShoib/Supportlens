@@ -180,3 +180,151 @@ just accumulate duplicates rather than being a safe no-op the way M1's ingestion
 **Alternatives:** upsert on `(ticket_id, task)` — would need a new unique constraint `Prediction` doesn't
 have today (unlike `LLMCall`'s `(purpose, model, prompt_hash)` cache key) and adds schema surface for a
 script that's expected to run as an occasional full backfill, not a high-frequency incremental job.
+
+## 2026-08-12 — The canonical `samsum` HF dataset no longer loads; `knkarthick/samsum` mirror used instead
+
+**Finding:** `datasets.load_dataset("samsum")` fails outright under this repo's `datasets>=3.1` pin —
+`"trust_remote_code is not supported anymore"` — because the canonical `samsum` repo ships as a Python
+loading script, and recent `datasets` versions refuse to execute loading-script datasets at all, not just
+warn about them. This wasn't a hypothetical risk flagged in advance; it was caught by actually trying to
+load the dataset while writing `ml/training/summarization_data.py`.
+**Decision:** use `knkarthick/samsum` and `knkarthick/dialogsum` — plain CSV-backed mirrors with identical
+`{id, dialogue, summary}` columns and the same split sizes as the original benchmarks (samsum:
+14731/818/819, dialogsum: 12460/500/1500).
+**Why:** these are the two live, no-loading-script mirrors on the Hub with matching schema and split sizes,
+so they reproduce the standard benchmark rather than reinventing it — consistent with M5's tweet_eval
+verbatim-split decision above.
+**Alternatives:** pin an older `datasets` version that still executes loading scripts — rejected, would
+conflict with the `datasets>=3.1` pin the rest of `ml/data/*` and M5 already depend on, for one dataset's
+sake.
+
+## 2026-08-12 — M6 pools samsum + dialogsum for training, evaluates ROUGE per dataset
+
+**Decision:** `ml/training/train_summarization.py` pools both datasets' `train` (and `val`) rows into one
+FLAN-T5-small fine-tune; `scripts/generate_m6_report.py` reports ROUGE-1/2/L against each dataset's own
+`test` split separately, never pooled.
+**Why:** samsum and dialogsum are the same task (dialogue → summary) from two different sources, not two
+different label sets the way M5's sentiment/emotion split was — pooling gives the fine-tune more stylistic
+diversity to learn from (dialogsum's service/call-center-style dialogues sit closer to this project's
+support-ticket domain than samsum's casual messenger chats). Test-time evaluation stays per-dataset so the
+numbers remain comparable to each published benchmark, the same logic as the 2026-08-12 tweet_eval entry
+above — pooling test rows would produce a number that isn't comparable to anything in the literature.
+**Alternatives:** train on dialogsum only (closer domain fit, but throws away samsum's larger train set);
+train two separate models, one per dataset (mirrors M3's dual-variant comparison structure instead of M5's
+single-model-per-task precedent) — rejected as more GPU time and report scope than the domain-gap question
+actually needs.
+
+## 2026-08-12 — M6's classical baseline is lead-k extractive summarization, k=4
+
+**Decision:** `ml/inference/extractive_summary.py::ExtractiveSummaryPredictor` returns the ticket's first k
+turns verbatim as the "summary" — no learned parameters, no model file, same shape as M4's
+`RulesEntityPredictor`. `DEFAULT_K=4`, picked by sweeping k=1..6 against the real pooled samsum+dialogsum
+val split (1,318 rows) and taking whichever maximizes ROUGE-1 (k=4: 0.3098 vs. k=3's 0.3095 — effectively a
+tie, ROUGE-2 keeps climbing past k=6 but ROUGE-1/L both peak at k=3-4).
+**Why:** SPEC M6's own accept criteria don't list a baseline comparison the way M3/M4/M5 do, but CLAUDE.md
+ground rule #2 ("Never skip the classical baseline... the comparison IS the deliverable") is unconditional,
+and every other learned M2-M5 component already has one. Lead-k is the standard, unglamorous extractive
+summarization baseline — cheap, deterministic, and a real chance to repeat M4's "the simple thing wins
+sometimes" story if FLAN-T5 underperforms on very short tickets.
+**Alternatives:** TextRank or another graph-based extractive method — more sophisticated, but adds a real
+dependency and tuning surface for a baseline whose entire point is being the cheap, boring comparison point;
+no baseline at all — rejected, contradicts CLAUDE.md rule #2 directly.
+
+## 2026-08-12 — Thread summaries are precomputed and persisted, not served live per ticket view
+
+**Decision:** `scripts/compute_thread_summaries.py` backfills `task="thread_summary"` `Prediction` rows
+(same full-recompute delete+reinsert shape as M5's trajectory backfill above); the dashboard's ticket page
+reads the persisted row via `GET /tickets/{id}/predictions?task=thread_summary`, it never calls
+`POST /predict/summary` live. The live endpoint still exists (API completeness, direct testing) and is what
+the backfill script calls under the hood.
+**Why:** SPEC §3's CPU latency budget allows summarization up to 3s/request — far slower than entities
+(250ms) or classification (150ms) — so computing it live on every ticket-page load would make the dashboard
+noticeably slower per view. M5 already established the precompute-and-persist pattern for exactly this
+reason class (an aggregate that's expensive enough to not want to redo on every read).
+**Alternatives:** live per-page-load via `POST /predict/summary`, mirroring M4's entities pattern — rejected
+given the latency gap; M4's entities call is fast enough that live serving is a non-issue there, and that
+reasoning doesn't transfer to a multi-second seq2seq generation call.
+
+## 2026-08-12 — `uv sync` (no `--group` flag) silently uninstalled CUDA torch and the whole `training` group
+
+**Finding:** running a bare `uv sync` (adding `rouge-score` to the default `ml` group) uninstalled
+`torch==2.6.0+cu124` along with `transformers`/`accelerate`/`sentencepiece`/`tiktoken`/`psutil` outright —
+not swapped to a CPU build, *removed* — because those packages were only present on this machine via a
+previous `--group training` sync, and a plain `uv sync` reconciles the venv to exactly the resolved
+default-groups set, uninstalling anything outside it. The two 2026-08-11 entries above document `--group
+training`/`--group serving` swapping the CUDA build for a CPU one; this is the same trap's more destructive
+sibling — a bare `uv sync` doesn't swap the non-default packages, it deletes them.
+**How to apply:** never run a bare `uv sync` on this GPU training box once `training` has been synced here —
+use `uv sync --group training` (accepting the CUDA→CPU swap that follows, per the existing recovery command)
+or `uv sync --no-sync` style scoping if only touching default-group deps. After *any* `uv sync` variant here,
+verify `uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available())"` before a real
+training run, exactly as the 2026-08-11 entry already prescribes.
+**Recovery used:** `uv sync --group training` (restored transformers/accelerate/etc., predictably swapped
+torch to `2.13.0+cpu`) → `uv pip install --reinstall torch==2.6.0 --index-url
+https://download.pytorch.org/whl/cu124` (restored the CUDA build) → separately, `safetensors` was left in a
+broken half-upgraded state (`ImportError: cannot import name 'TensorSpec'`, a stale compiled
+`_safetensors_rust.pyd` next to newer Python wrapper code, caused by a locked file mid-upgrade — see the next
+entry) → `uv pip install --reinstall safetensors` fixed it.
+
+## 2026-08-12 — A running `uvicorn` dev server can corrupt the venv mid-`uv sync`
+
+**Finding:** `uv sync` failed twice with `error: failed to remove file ...\_safetensors_rust.pyd: Access is
+denied` while `make dev`'s uvicorn process (which has `transformers`/`safetensors` loaded in memory) was
+still running. uv partially completed the install regardless (new `.dist-info` metadata written, old
+compiled extension left in place), leaving `transformers` unimportable
+(`ImportError: cannot import name 'TensorSpec' from 'safetensors'`) until the dev server was killed and
+`safetensors` reinstalled.
+**How to apply:** stop any running `uvicorn`/API dev server before `uv sync`/`uv pip install` touches
+`transformers`, `torch`, or `safetensors` specifically — a locked native extension file doesn't just fail
+loudly, it can leave a half-upgraded package that fails on import later, silently, at a point disconnected
+from the sync command that caused it.
+
+## 2026-08-12 — `scripts/make_stub_models.py`'s `build_all()` regenerates every fixture, not just new ones
+
+**Finding:** adding `stub_transformer_thread_summary` and running `uv run python scripts/make_stub_models.py`
+(no args) to generate it also rewrote all 8 pre-existing committed fixtures — `git status` showed them
+modified even though nothing about their own recipes changed. `--check` still reported "all stub fixtures
+match their reproducible recipe" immediately afterward, because at just-regenerated files trivially match
+themselves; that comparison is only meaningful against the previously-committed bytes.
+**How to apply:** when adding one new stub fixture, call that fixture's own `build_stub_*` function directly
+(or `git checkout --` the unrelated fixtures afterward, which is what was done here) rather than running
+`build_all()`/the bare CLI, to avoid an unreviewed diff across every other module's committed fixtures.
+
+## 2026-08-12 — T5's tokenizer needs `return_token_type_ids=False`, unlike every prior stub
+
+**Finding:** `SummarizationPredictor.predict()` crashed with `ValueError: The following model_kwargs are not
+used by the model: ['token_type_ids']` when tokenizing with the generic `PreTrainedTokenizerFast`-based stub
+(`stub_transformer_thread_summary`). Real T5 tokenizers never emit `token_type_ids`; a plain
+`PreTrainedTokenizerFast` (built from a bare `tokenizers.Tokenizer`, the same technique
+`scripts/make_stub_models.py` already used for the BERT-based stubs) does by default, and T5's `.generate()`
+rejects the extra kwarg outright rather than ignoring it.
+**Decision:** `ml/inference/summarization.py`'s tokenizer call passes `return_token_type_ids=False`
+explicitly, rather than only fixing the stub tokenizer's construction.
+**Why:** fixing it at the call site protects against *any* tokenizer that happens to emit `token_type_ids`
+(stub or otherwise), not just this one stub's specific construction — a one-line, zero-cost guard versus a
+fixture-specific workaround that a future different stub could reintroduce.
+
+## 2026-08-12 — The real M6 run, and a real duplicate-judging bug found and fixed in the process
+
+**What happened:** the real GPU fine-tune landed (`models/transformer_thread_summary_flan-t5-small_v1/final/`,
+307MB, a genuine FLAN-T5-small checkpoint, not the CPU smoke-test artifact). Full-corpus transformer backfill
+(~63k tickets) would have taken ~7-8 hours on CPU at the measured ~430ms/ticket, so
+`scripts/compute_thread_summaries.py` gained a `--limit` flag (see the entry above this one) and was run with
+`--limit 500` instead — enough to demo the feature and feed the judge sample without an overnight run.
+**Bug found:** following this repo's own documented workflow (`docs/m6-how-to-run-locally.md`: "cheap dry run
+first" with `--limit 5`, then the full `--limit 50`) left **5 tickets judged twice** — 55
+`thread_summary_judge` rows for only 50 distinct tickets. `ml/data/llm_judge_summaries.py`'s sampling was
+purely seed-deterministic with no memory of what had already been judged, so the full run's first 5 picks
+were identical to the dry run's 5 (same seed, same candidate pool) — cache hits on the OpenAI call (no
+re-billing) but each loop iteration unconditionally inserts a new `Prediction` row regardless of cache status.
+**Fix:** `_sample_summary_predictions` now excludes tickets with an existing `thread_summary_judge` Prediction
+(for the transformer model version) from the candidate pool before sampling. The 5 stale duplicate rows
+(the dry run's copies, identical scores to their duplicates since the LLM call was cached) were deleted
+directly from Postgres to bring the real run back to exactly 50 distinct judged tickets, per SPEC M6's
+"exactly 50" wording, before `scripts/generate_m6_report.py` was re-run to persist the final EvalRun and
+render the real `docs/m6-comparison-report.md`.
+**Why this matters:** `ml/data/llm_judge_summaries.py` was modeled directly on `ml/data/llm_seed_labels.py`,
+which has the identical unguarded-reinsert pattern (no check for "is this message already labeled" before
+adding a Prediction) — this bug is latent there too, just never triggered because M2's seed-labeling was
+always run as one single batch, never a small dry run followed by a larger one. Worth revisiting if
+`llm_seed_labels.py` is ever re-run incrementally.
