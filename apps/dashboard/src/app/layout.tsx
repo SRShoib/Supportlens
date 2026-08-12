@@ -43,6 +43,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <Link href="/search" className="hover:text-zinc-900 dark:hover:text-zinc-50">
                 Search
               </Link>
+              <Link href="/metrics" className="hover:text-zinc-900 dark:hover:text-zinc-50">
+                Metrics
+              </Link>
             </nav>
           </div>
         </header>
