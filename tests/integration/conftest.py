@@ -1,10 +1,17 @@
+import contextlib
 from collections.abc import Iterator
+from typing import TYPE_CHECKING
 
 import pytest
 from api.db.session import make_engine
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 from testcontainers.community.postgres import PostgresContainer
+
+if TYPE_CHECKING:
+    from testcontainers.community.chroma import ChromaContainer
+
+    from ml.inference.vector_store import ChromaVectorStore
 
 
 def _docker_available() -> bool:
@@ -69,3 +76,55 @@ def db_session(migrated_db: str) -> Iterator[Session]:
     session.commit()
     yield session
     session.close()
+
+
+@pytest.fixture(scope="session")
+def chroma_container() -> Iterator["ChromaContainer"]:
+    # chromadb lives behind the `search` dependency group (SPEC M8), not
+    # synced by default -- same reason ml/inference/vector_store.py lazily
+    # imports it. Skips this fixture (and every test that depends on it)
+    # cleanly rather than failing when it's absent, e.g. CI's default
+    # `--group serving` sync.
+    pytest.importorskip("chromadb")
+    from testcontainers.community.chroma import ChromaContainer
+
+    # Pinned to match infra/docker-compose.yml's production service exactly
+    # -- the testcontainers default (chromadb/chroma:1.0.0) speaks a
+    # different heartbeat API version (v2) than what's actually deployed
+    # (0.5.23, v1), so testing against the default would validate a server
+    # this project doesn't run in production.
+    with ChromaContainer(image="chromadb/chroma:0.5.23") as chroma:
+        yield chroma
+
+
+# The two collection names apps/api/routers/search.py and rag.py actually
+# query (ml/inference/retrieval.py). Tests that need to exercise the real
+# router against real Chroma have no choice but to use these exact names;
+# tests that just want an isolated scratch collection should mint their own
+# unique name instead (see test_vector_store_chroma.py's _collection_name)
+# rather than relying on the reset below.
+_ROUTER_COLLECTIONS = ("resolved_tickets", "kb_articles")
+
+
+@pytest.fixture
+def chroma_store(chroma_container: "ChromaContainer") -> "ChromaVectorStore":
+    """A real ChromaVectorStore talking to the real containerized server --
+    unlike every other M8 test's injected fake store, this exercises
+    ml/inference/vector_store.py's actual chromadb.HttpClient wiring
+    (CLAUDE.md: "Integration tests use testcontainers for... Chroma").
+    Function-scoped: each test gets a fresh ChromaVectorStore instance, but
+    the container itself is session-scoped for speed, so this resets the
+    two well-known router collections before every test -- same "clean
+    slate per test" contract db_session's TRUNCATE gives Postgres, just via
+    delete-and-recreate since Chroma has no TRUNCATE equivalent."""
+    import chromadb
+
+    config = chroma_container.get_config()
+    raw_client = chromadb.HttpClient(host=config["host"], port=config["port"])
+    for name in _ROUTER_COLLECTIONS:
+        with contextlib.suppress(Exception):
+            raw_client.delete_collection(name)  # didn't exist yet -- also a clean slate
+
+    from ml.inference.vector_store import ChromaVectorStore
+
+    return ChromaVectorStore(host=config["host"], port=config["port"])

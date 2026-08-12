@@ -558,3 +558,26 @@ ticket, ~$0.0003) confirmed the drafted reply's sources no longer include the ti
 *logic* is correct, not that it's exercised the way real data actually shapes it (here: query text and one
 candidate document being derived from the exact same source object). Worth remembering for any future
 retrieval feature keyed by a document's own content.
+
+## 2026-08-12 — M8 Chroma integration tests: real server via testcontainers, pinned to the deployed version
+
+**Decision:** `tests/integration/conftest.py` adds `chroma_container` (session-scoped
+`testcontainers.community.chroma.ChromaContainer`, pinned to `chromadb/chroma:0.5.23` — testcontainers'
+own default is `1.0.0`, a different heartbeat API version than what `infra/docker-compose.yml` actually
+runs) and `chroma_store` (a real `ChromaVectorStore` against it, resetting the two router-facing collection
+names before every test — Chroma has no `TRUNCATE`, so this is delete-and-recreate instead). Both are
+gated behind `pytest.importorskip("chromadb")` since `chromadb` lives in the `search` group, not CI's
+default `--group serving` sync — every test using them skips cleanly rather than failing when it's absent,
+verified directly: re-ran the full integration suite after `uv sync --frozen --group serving` (no `search`)
+and got 8 clean skips, zero failures, matching what CI's job actually has installed.
+**Why:** CLAUDE.md: "Integration tests use testcontainers for Postgres/Chroma" — every other M8 test
+(search router, RAG drafting) injects a fake store, which never exercises
+`ml/inference/vector_store.py`'s actual `chromadb.HttpClient` wiring at all. Real testing paid off
+immediately: the real server rejected `metadatas=[{}]` (empty dict) with `"Expected metadata to be a
+non-empty dict"` — a constraint the fake `FakeCollection` test double happily accepts and
+`scripts/index_search_corpus.py` never violates in practice (every real metadata dict has several keys),
+but would have been invisible without a real server in the loop.
+**Alternatives:** keep every M8 Chroma test on the fake store (rejected — leaves the actual HTTP client
+integration completely unverified, the same gap CLAUDE.md's testcontainers rule exists to close); use
+testcontainers' default `chromadb/chroma:1.0.0` image (rejected — validates a server version this project
+doesn't deploy).
