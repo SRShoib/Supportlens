@@ -80,6 +80,23 @@ serving = [
     "sentencepiece>=0.2",
     "protobuf>=5.0",
 ]
+# M7's offline topic-discovery pipeline: embed the corpus, fit BERTopic
+# (UMAP + HDBSCAN), assign topics back to Postgres. Deliberately its own
+# group, not `serving` — the API never loads an embedding or topic model
+# (scripts/assign_topics.py writes results to Postgres; apps/api only reads
+# them back, see docs/decisions.md), so none of this enters
+# infra/api.Dockerfile or CI's default sync. sentence-transformers pulls in
+# torch as a hard dependency (unlike `transformers`, where it's an optional
+# backend); a plain `uv sync --group topics` resolves it to the CPU wheel
+# via the `pytorch-cpu` source below, same as `serving` — swap to the CUDA
+# build afterward with the same manual reinstall command documented in
+# docs/decisions.md if embedding the corpus locally on GPU.
+topics = [
+    "sentence-transformers>=3.2",
+    "bertopic>=0.16",
+    "umap-learn>=0.5",
+    "hdbscan>=0.8.40",
+]
 
 [tool.uv]
 default-groups = ["ml", "dev"]
@@ -135,6 +152,10 @@ module = [
     "evaluate.*",
     "yaml.*",
     "rouge_score.*",
+    "sentence_transformers.*",
+    "bertopic.*",
+    "umap.*",
+    "hdbscan.*",
 ]
 ignore_missing_imports = true
 

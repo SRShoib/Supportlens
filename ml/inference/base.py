@@ -55,6 +55,11 @@ class SummaryResult:
     summary: str
 
 
+@dataclass(frozen=True)
+class EmbeddingResult:
+    vector: list[float]
+
+
 def format_dialogue(turns: list[tuple[str, str]]) -> str:
     """Renders a ticket's message thread as one newline-joined "Speaker:
     text" string -- the shared input contract every M6 predictor takes
@@ -73,3 +78,4 @@ def format_dialogue(turns: list[tuple[str, str]]) -> str:
 ClassificationPredictor = Predictor[TaskResult]
 EntityPredictor = Predictor[EntityResult]
 SummaryPredictor = Predictor[SummaryResult]
+EmbeddingPredictor = Predictor[EmbeddingResult]

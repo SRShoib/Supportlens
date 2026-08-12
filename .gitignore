@@ -18,9 +18,11 @@ htmlcov/
 data/raw/*
 data/interim/*
 data/splits/*
+data/embeddings/*
 !data/raw/.gitkeep
 !data/interim/.gitkeep
 !data/splits/.gitkeep
+!data/embeddings/.gitkeep
 models/*
 !models/.gitkeep
 .chroma/

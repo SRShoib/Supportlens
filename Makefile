@@ -1,6 +1,6 @@
 COMPOSE = docker compose --env-file .env -f infra/docker-compose.yml
 
-.PHONY: install install-training dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency ner-data ner-paraphrase ner-gold-export ner-gold-import train-ner eval-ner sentiment-emotion-data train-baseline-sentiment train-baseline-emotion predict-sentiment eval-sentiment summarization-data train-summarization predict-summary judge-summaries eval-summarization
+.PHONY: install install-training install-topics dev up down clean logs ps test test-unit test-int cov-clean lint fmt migrate revision ingest-bitext ingest-twitter build-slice build-splits seed eval eval-transformers tokenization-doc train-baseline-intent train-baseline-urgency seed-label-urgency ner-data ner-paraphrase ner-gold-export ner-gold-import train-ner eval-ner sentiment-emotion-data train-baseline-sentiment train-baseline-emotion predict-sentiment eval-sentiment summarization-data train-summarization predict-summary judge-summaries eval-summarization embed-tickets fit-topics assign-topics topic-labels eval-topics
 
 install:
 	uv sync
@@ -12,6 +12,12 @@ install:
 # see docs/decisions.md for the separate CUDA torch install command.
 install-training:
 	uv sync --group training
+
+# Opt-in only (sentence-transformers/bertopic/umap-learn/hdbscan for M7's
+# offline topic pipeline, plus a CPU torch pulled in transitively). Same
+# CUDA-swap caveat as install-training — see docs/decisions.md.
+install-topics:
+	uv sync --group topics
 
 dev:
 	$(COMPOSE) up -d --wait postgres chroma
@@ -139,3 +145,18 @@ judge-summaries:
 
 eval-summarization:
 	uv run python scripts/generate_m6_report.py
+
+embed-tickets:
+	uv run python scripts/compute_embeddings.py
+
+fit-topics:
+	uv run python ml/training/topic_model.py --config ml/training/configs/topics_minilm_bertopic.yaml
+
+assign-topics:
+	uv run python scripts/assign_topics.py
+
+topic-labels:
+	uv run python -m ml.data.llm_topic_labels
+
+eval-topics:
+	uv run python scripts/generate_m7_report.py
