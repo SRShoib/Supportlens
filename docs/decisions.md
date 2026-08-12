@@ -897,3 +897,39 @@ real production Docker build: zero console/page errors.
 real production build + real hydration (never manifested under `pnpm dev` on the host, which is how every
 M7-M9 dashboard screenshot in this project was taken) — another instance of the same "docker compose up was
 never actually run end-to-end" gap this module exists to close.
+
+## 2026-08-12 — Two more findings from the real fresh-clone validation itself
+
+**Finding 1 — `apps/dashboard/public/` doesn't exist on a fresh clone.** The directory is empty locally
+(nothing in it needs to be there — App Router keeps `favicon.ico` under `src/app/`, not `public/`) and git
+does not track empty directories at all, so it was never committed. `infra/dashboard.Dockerfile`'s
+`COPY --from=build /app/public ./public` unconditionally expects it to exist, and failed outright the first
+time this project was actually built from a real `git clone` rather than the same long-lived working
+directory every module up to this one was developed and tested in. **Fixed:** added
+`apps/dashboard/public/.gitkeep` so the directory is committed and exists on every clone.
+**How this was caught:** by doing the literal thing SPEC M10's accept criterion asks for — cloning into a
+genuinely fresh directory and running the documented quickstart — rather than testing against the
+already-populated, already-built working tree every module before this one was verified in. Same lesson as
+every other M10 finding above: nothing before this ever ran `docker compose up` from a real fresh clone.
+
+**Finding 2 — `infra/docker-compose.yml`'s hardcoded `name: supportlens` collides across clones on the same
+machine.** Docker Compose's project-name precedence is `-p` flag > `COMPOSE_PROJECT_NAME` env var > the
+compose file's own `name:` field > the directory basename — so *any* `docker compose` invocation against
+this file, from *any* clone, on the same machine, resolves to the same project name and therefore the same
+container/volume/network names, regardless of which directory it's run from. Running the fresh-clone
+validation the first time (via `make demo`, whose `$(COMPOSE)` has no `-p` override) silently recreated the
+real dev stack's own `supportlens-postgres-1`/`supportlens-chroma-1` containers — reusing their existing
+data volumes (confirmed intact: `SELECT count(*) FROM tickets` still returned 63,451 both before and after)
+but rebinding them to the fresh clone's `.env` ports, and creating brand-new `api`/`dashboard` containers
+from a stale pre-existing `supportlens-api` image (predating this module, hence the following
+`ml.data.seed_demo` `ModuleNotFoundError`). Recovered by stopping/removing the stray `api`/`dashboard`
+containers and re-running `up -d --wait postgres chroma` with the real `.env` to restore the original port
+bindings — verified via the same row-count query before declaring it fixed. The actual validation was then
+redone correctly with an explicit `-p supportlens-freshclone` override, isolating it completely (its own
+containers/volumes/network, torn down cleanly afterward, real dev stack never touched again).
+**Why this matters:** a real risk only for a developer running the demo path in a second clone on a machine
+that *already* has a supportlens dev environment running (exactly what happened here) — a genuinely separate
+fresh machine has no prior containers to collide with, so this doesn't invalidate the "fresh-machine
+clone-to-running" claim itself, but it's a real footgun worth knowing about. Not changed in the compose file
+itself (the hardcoded project name is otherwise a reasonable default for the common case), but worth this
+explicit warning for exactly the scenario that caused it.
