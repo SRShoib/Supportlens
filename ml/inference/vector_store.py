@@ -61,7 +61,13 @@ class Collection(Protocol):
 
 
 class ChromaClient(Protocol):
-    def get_or_create_collection(self, name: str, metadata: dict[str, Any]) -> Collection: ...
+    # `metadata` is keyword-only here (unlike Collection.upsert/query above)
+    # so this stays structurally compatible with chromadb's real ClientAPI,
+    # whose get_or_create_collection has extra positional params
+    # (configuration, embedding_function, data_loader) before its own
+    # metadata kwarg -- this class is only ever called with metadata= (see
+    # _collection below), never positionally.
+    def get_or_create_collection(self, name: str, *, metadata: dict[str, Any]) -> Collection: ...
 
 
 class ChromaVectorStore:
@@ -78,7 +84,13 @@ class ChromaVectorStore:
             from api.config import get_settings
 
             settings = get_settings()
-            self._client = chromadb.HttpClient(
+            # chromadb.HttpClient's real return type (ClientAPI) is a much
+            # wider, numpy/generic-parameterized interface than the minimal
+            # ChromaClient Protocol above -- structurally compatible at
+            # runtime (every call site here uses metadata= by keyword) but
+            # not close enough for mypy's protocol-assignment check to
+            # verify on its own.
+            self._client = chromadb.HttpClient(  # type: ignore[assignment]
                 host=host or settings.chroma_host, port=port or settings.chroma_port
             )
 
