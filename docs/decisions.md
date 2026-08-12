@@ -683,3 +683,50 @@ machine-specific and will drift with hardware.
 **Alternatives:** add the persist call directly to M3-M6's scripts (rejected, cost above); benchmark only
 the "deployed" model per task instead of every variant (rejected — M3-M6's own reports already benchmark
 every variant, not just the winner, and the comparison value is the same here).
+
+## 2026-08-12 — M9 drift: reference week / live window choice, data sources, and threshold calibration
+
+**Decision:** `scripts/compute_drift.py` computes both of SPEC M9's drift signals — centroid cosine shift
+(embedding-distribution distance) and PSI (prediction-distribution shift, over the urgency label) — between
+a single **reference week** (`2017-10-09`) and a 4-week **live window** (`2017-11-06` through `2017-11-27`),
+both drawn from the real Twitter corpus's stable high-volume tail (~3500-3600 tickets/week each), separated
+by a 2-week gap so they aren't adjacent. Each signal also runs a **simulated** scenario: the same reference
+week against a slice of Bitext tickets (~3000 for the embedding signal, all 26,872 persisted for the PSI
+signal) standing in for "topically different live traffic" (SPEC M9: "feed the app a topically different
+slice"). Embedding vectors reuse M7's already-computed corpus embeddings
+(`data/embeddings/tickets_minilm_v1.{npy,parquet}`) for every real-corpus week; the Bitext slice is embedded
+once, offline, in this script (Bitext was deliberately excluded from M7's own embeddings — see the M7
+embedding-scope entry above). Urgency labels for both scenarios are read straight from M5's already-persisted
+`sentiment_trajectory` Prediction payloads (`payload["urgency_label"]`) — zero new inference for either
+signal.
+**Why these specific weeks:** queried directly against the real ingested corpus (36,579 Twitter tickets,
+`created_at` spanning 2008-05 to 2017-12). `select_dense_window` (M7's own dense-window logic, reused as-is)
+returns a 146-week contiguous run, but volume inside it ramps from 2 tickets/week (2015-02) to ~3600/week
+(late 2017) — the sparse early weeks would make either signal's centroid/PSI estimate noise-dominated.
+`2017-10-09` through `2017-11-27` is the last 8 weeks of that run, all within a stable 3500-3600 range —
+picked from *actually querying* the real weekly counts, not guessed.
+**Why urgency (not intent) for the prediction-drift signal:** already decided in the M9 planning discussion —
+intent is Bitext-trained and Bitext's `created_at` is always NULL (2026-08-12 M7 embedding-scope entry), so
+it structurally can't be bucketed by week at all. Urgency and sentiment both could; urgency was picked as the
+more operationally meaningful signal for a support-ticket system.
+**Threshold calibration (measured against the real corpus, same methodology as M7's z-score and M8's
+MIN_CONFIDENCE):**
+- PSI uses the standard, already-established interpretation bands (0.1 watch / 0.25 alarm) — not
+  corpus-specific, so not re-derived, but confirmed against real data anyway: real week-vs-week urgency PSI
+  measured 0.0064 (reference week vs. the real live window); the simulated Bitext injection measured 0.6679
+  — both land squarely inside their expected band.
+- Centroid cosine shift has no external convention, so `EMBEDDING_DRIFT_THRESHOLD = 0.05`
+  (`ml/evaluation/drift_metrics.py`) was picked from a direct measurement: real week-vs-week shift measured
+  0.0028-0.0044 across several week pairs tried during development; the simulated Bitext injection measured
+  0.60-0.64. The threshold sits roughly an order of magnitude above the real-noise ceiling and well below the
+  simulated signal, the same wide-clean-gap shape M8's confidence-gate measurement found.
+**Real run result:** both signals PASS SPEC M9's acceptance framing — real reference-week-vs-live-window
+comparisons fire no alarm on either signal (cosine shift 0.0028, PSI 0.0064, both "stable"/no-alarm), the
+simulated Bitext-injected scenario fires both (cosine shift 0.6044 alarm, PSI 0.6679 alarm) — see
+`docs/m9-drift-report.md`, generated from the persisted `eval_runs` rows, not hand-typed.
+**Alternatives:** recompute embeddings live for whatever window is requested instead of reusing M7's static
+artifact (rejected in the M9 planning discussion — duplicates M7's artifact and pulls a live-embedding
+dependency into a batch eval script for no real benefit); gate the simulated scenario behind a full M1
+ingestion pipeline run instead of an eval-script comparison (rejected in the same discussion — heavier,
+duplicates M1 machinery for a one-off demo, and M7/M8 already established the "eval-script simulation,
+screenshot the rendered result" pattern for exactly this kind of acceptance evidence).
