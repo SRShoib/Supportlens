@@ -202,3 +202,58 @@ export async function predictEntities(texts: string[]): Promise<EntityResult[]> 
   }
   return results;
 }
+
+// Mirrors apps/api/schemas/topic.py -- SPEC M7's topic catalog + weekly
+// volume trend + emerging-issues surfaces. Unlike predictEntities above,
+// none of these ever compute live: they read straight from what
+// scripts/assign_topics.py already wrote to Postgres (GET /topics/* never
+// loads an embedding or topic model, see docs/decisions.md).
+export interface Topic {
+  id: string;
+  topic_key: number;
+  label: string;
+  keywords: string[];
+  size: number;
+  model_version: string;
+  created_at: string;
+}
+
+export interface TopicVolumePoint {
+  week: string;
+  count: number;
+  share: number;
+  z_score: number | null;
+  is_emerging: boolean;
+}
+
+export interface TopicVolumeSeries {
+  topic_id: number;
+  label: string;
+  points: TopicVolumePoint[];
+}
+
+export interface TopicVolumeResponse {
+  weeks: string[];
+  series: TopicVolumeSeries[];
+}
+
+export interface EmergingIssue {
+  topic_id: number;
+  label: string;
+  week: string;
+  count: number;
+  share: number;
+  z_score: number;
+}
+
+export async function listTopics(): Promise<Topic[]> {
+  return apiFetch<Topic[]>("/topics");
+}
+
+export async function getTopicVolume(): Promise<TopicVolumeResponse> {
+  return apiFetch<TopicVolumeResponse>("/topics/volume");
+}
+
+export async function getEmergingIssues(): Promise<EmergingIssue[]> {
+  return apiFetch<EmergingIssue[]>("/topics/emerging");
+}
