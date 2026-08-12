@@ -33,6 +33,12 @@ const PADDING_LEFT = 12;
 const PADDING_RIGHT = 12;
 const PADDING_TOP = 12;
 const PADDING_BOTTOM = 24;
+// The real corpus's dense window runs 70+ weeks (SPEC M7's window is
+// data-driven, not a fixed handful of weeks -- see
+// ml/evaluation/trend_metrics.py's select_dense_window) -- one <text> per
+// week would overlap into unreadable noise well before that, so the x-axis
+// shows at most this many evenly-spaced labels instead of every week.
+const MAX_X_LABELS = 9;
 
 const SERIES_STROKE_CLASS = [
   "stroke-blue-500 dark:stroke-blue-400",
@@ -77,6 +83,16 @@ function seriesTotal(series: TopicVolumeSeries): number {
   return series.points.reduce((sum, point) => sum + point.count, 0);
 }
 
+// Evenly-spaced week indices to label, always including the first and last
+// week, capped at MAX_X_LABELS regardless of how many weeks there are.
+function labeledWeekIndices(weekCount: number): Set<number> {
+  if (weekCount <= MAX_X_LABELS) {
+    return new Set(Array.from({ length: weekCount }, (_, i) => i));
+  }
+  const step = (weekCount - 1) / (MAX_X_LABELS - 1);
+  return new Set(Array.from({ length: MAX_X_LABELS }, (_, i) => Math.round(i * step)));
+}
+
 export function TopicsOverTimeChart({ weeks, series }: TopicsOverTimeChartProps) {
   if (weeks.length === 0 || series.length === 0) {
     return (
@@ -99,6 +115,7 @@ export function TopicsOverTimeChart({ weeks, series }: TopicsOverTimeChartProps)
     PADDING_LEFT + (weeks.length > 1 ? stepX * weekIndex : plotWidth / 2);
   const yFor = (count: number) => PADDING_TOP + plotHeight * (1 - count / maxCount);
   const baselineY = HEIGHT - PADDING_BOTTOM;
+  const labeledIndices = labeledWeekIndices(weeks.length);
 
   return (
     <div>
@@ -118,17 +135,20 @@ export function TopicsOverTimeChart({ weeks, series }: TopicsOverTimeChartProps)
           strokeWidth={1}
           className="stroke-zinc-200 dark:stroke-zinc-700"
         />
-        {weeks.map((week, i) => (
-          <text
-            key={week}
-            x={xFor(i)}
-            y={HEIGHT - 6}
-            textAnchor="middle"
-            className="fill-zinc-400 text-[9px] dark:fill-zinc-500"
-          >
-            {formatWeek(week)}
-          </text>
-        ))}
+        {weeks.map(
+          (week, i) =>
+            labeledIndices.has(i) && (
+              <text
+                key={week}
+                x={xFor(i)}
+                y={HEIGHT - 6}
+                textAnchor="middle"
+                className="fill-zinc-400 text-[9px] dark:fill-zinc-500"
+              >
+                {formatWeek(week)}
+              </text>
+            ),
+        )}
 
         {shown.map((s, seriesIndex) => {
           const pointByWeek = new Map(s.points.map((p) => [p.week, p]));
