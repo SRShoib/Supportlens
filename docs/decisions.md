@@ -581,3 +581,65 @@ but would have been invisible without a real server in the loop.
 integration completely unverified, the same gap CLAUDE.md's testcontainers rule exists to close); use
 testcontainers' default `chromadb/chroma:1.0.0` image (rejected — validates a server version this project
 doesn't deploy).
+
+## 2026-08-12 — M8 embedding unit for tickets: customer-problem text, full thread in metadata
+
+**Decision:** `resolved_tickets`' embedded/matched text (`document`, what `/search`'s cosine similarity and
+highlighting both operate on) is the same customer-messages-only concatenation M7 already used
+(`scripts/compute_embeddings.py::build_documents`, reused directly). The full thread — customer *and*
+agent, in order — rides along in `metadata["thread_text"]` and is never embedded or matched against.
+**Why:** the two features need different things from the same ticket. Retrieval matches a live query
+("my package never arrived") against what a customer *asked*, so the indexed text should read like a
+question, not a resolved conversation — embedding the full thread would mean a ticket's own agent reply
+("we've refunded you") pollutes what the query is being matched against. RAG drafting is the opposite: it
+needs the agent's resolution specifically to draft from, which customer-only text doesn't have. Storing
+both once, keyed by the same ticket, avoids either feature quietly regressing the other.
+**Alternatives:** embed the full thread (rejected — agent boilerplate/resolution text would dominate match
+scoring, e.g. many resolved tickets share near-identical "please DM us" agent replies that would otherwise
+cluster unrelated issues together); two separate Chroma collections per ticket, one per embedding unit
+(rejected — doubles indexing/storage for no benefit once metadata already carries the second view for free).
+
+## 2026-08-12 — M8 retrieval eval queries: first customer message, tickets with ≥ 2 required
+
+**Decision:** `ml/data/retrieval_eval_set.py` samples 100 resolved tickets (seed 42) restricted to those
+with **at least 2** customer messages, and uses the **first** one as the query text — never the ticket's
+own full indexed document.
+**Why:** the indexed document a query needs to *find* is the concatenation of every customer message on
+that ticket (see the embedding-unit entry above). A ticket with only 1 customer message has a query
+identical to its own indexed text — a free, meaningless "hit". Requiring ≥ 2 guarantees every eval query is
+a genuine partial view of a longer document it needs to actually retrieve, not a lookup of itself.
+**Alternatives:** allow single-message tickets too (rejected — inflates hit-rate@5 with trivial identical-
+text lookups, undermining the metric's honesty); paraphrase the query text with an LLM for more realistic
+phrasing (rejected — budget: SPEC M8's line item is for reply drafting, not eval-set construction, and the
+zero-cost approach is already non-trivial per the ≥2-messages requirement above).
+
+## 2026-08-12 — M8 breaks the "apps/api never loads an embedding model" precedent, on purpose
+
+**Decision:** `infra/api.Dockerfile` syncs a new `search` dependency group (sentence-transformers +
+chromadb) alongside `serving`, and `apps/api/routers/search.py`/`rag.py` load a real embedder (and,
+depending on the request, a real cross-encoder) at request time.
+**Why:** the 2026-08-10 "Chroma boots in M0, stays unused until M8" entry already committed to this landing
+in M8; the specific mechanism is worth recording because it reverses `ml/inference/embeddings.py`'s own
+M7-era docstring claim that apps/api never loads an embedding model. That claim was true for M7 (the whole
+corpus is embedded once, offline, and only *assignments* are read back live) but can't hold for M8: dense
+retrieval on an arbitrary live query has no offline equivalent — there is no "precomputed embedding" for a
+question nobody has asked yet. Every model load stays lazily imported (`ml/inference/embeddings.py`'s
+docstring, `apps/api/routers/search.py`'s `_get_*` functions) so a deployment that never hits `/search` or
+the RAG endpoint never pays the import cost, but the *dependency*, unlike `topics`, has to ship in the image.
+**Alternatives:** none seriously considered — a live semantic search endpoint structurally requires this;
+the only real choice was making the precedent-break explicit here rather than leaving the M7 docstring's
+claim silently wrong.
+
+## 2026-08-12 — M8 budget guard: a token ceiling on top of the dollar ceiling, both required
+
+**Decision:** `ml/inference/llm_client.py::LLMClient.complete()` gained an optional `max_tokens` parameter
+(previously absent — every prior caller got an unbounded completion), and `ml/inference/rag_reply.py`
+always passes `settings.rag_max_completion_tokens` (env `RAG_MAX_COMPLETION_TOKENS`, default 400).
+**Why:** SPEC M8 explicitly asks for "a hard budget guard in code (env-configured token ceiling)" — distinct
+wording from the dollar-based `LLM_BUDGET_USD` guard `LLMClient` already had. The dollar guard stops *future*
+calls once the running total crosses a line; it does nothing to bound any single call's own completion
+length, which a token ceiling does directly and which also keeps typical suggested-reply drafts from running
+needlessly long (a support reply longer than ~400 tokens is itself a smell, not just a cost one).
+**Alternatives:** treat the existing dollar guard as satisfying SPEC's wording (rejected — different failure
+mode, and SPEC's phrase "token ceiling" is specific enough that reinterpreting it would be silently
+reinterpreting an acceptance criterion, which CLAUDE.md's ground rule #1 says to raise, not do quietly).
