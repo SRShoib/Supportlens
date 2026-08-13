@@ -20,11 +20,20 @@ jobs:
 
       - run: uv python install 3.11
 
-      # Default groups (ml + dev) plus `serving` — the API's real CPU
-      # transformer-inference path (M3) is production code and gets tested
-      # for real, unlike `training` (GPU-fine-tuning-only, deliberately
+      # Default groups (ml + dev) plus `serving` and `search` — the API's
+      # real CPU transformer-inference path (M3) and live search/RAG path
+      # (M8, chromadb included) are both production code and get tested for
+      # real, unlike `training` (GPU-fine-tuning-only, deliberately
       # excluded, matching CLAUDE.md's "no training in this repo's runtime").
-      - run: uv sync --frozen --group serving
+      # `search` matters for mypy specifically: pyproject.toml's
+      # ignore_missing_imports=true for chromadb.* means an environment
+      # without it installed silently types every chromadb.* attribute as
+      # Any, which makes ml/inference/vector_store.py's real, load-bearing
+      # `# type: ignore[assignment]` comments (needed once chromadb's real
+      # types are visible) look unused instead -- warn_unused_ignores=true
+      # then fails the build over a false positive caused by the missing
+      # dependency, not a real code issue.
+      - run: uv sync --frozen --group serving --group search
 
       - run: uv run ruff check .
 
