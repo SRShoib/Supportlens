@@ -182,6 +182,8 @@ def index_chroma(session: Session) -> None:
 
 
 def main() -> None:
+    from api.config import get_settings
+
     session = SessionLocal()
     try:
         print(f"seeded {seed_tickets(session)} tickets")
@@ -189,7 +191,15 @@ def main() -> None:
         print(f"seeded {seed_topics(session)} topics")
         print(f"seeded {seed_kb_articles(session)} kb articles")
         print(f"seeded {seed_eval_runs(session)} eval runs")
-        index_chroma(session)
+        # Skipped entirely when SEARCH_ENABLED=false -- not just pointless
+        # (nothing would ever query the index) but actively what causes
+        # apps/api/config.py's documented 512MB overrun on boot: this is
+        # what forces the sentence-transformers/torch import on every
+        # container start, regardless of whether any request ever needs it.
+        if get_settings().search_enabled:
+            index_chroma(session)
+        else:
+            print("search_enabled=false -- skipping Chroma reindex")
     finally:
         session.close()
 

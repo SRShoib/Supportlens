@@ -59,9 +59,24 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!response.ok) {
+    // FastAPI's HTTPException bodies are {"detail": "..."} -- e.g. the
+    // SEARCH_ENABLED=false 503s from search.py/rag.py carry a message
+    // worth showing an agent verbatim ("Search is not available on this
+    // deployment...") rather than a bare "503 Service Unavailable". Falls
+    // back to the generic status line for non-JSON bodies or bodies
+    // without a `detail` string (network-level errors, other services).
+    let detail: string | undefined;
+    try {
+      const body = (await response.json()) as { detail?: unknown };
+      if (typeof body.detail === "string") {
+        detail = body.detail;
+      }
+    } catch {
+      // Response body wasn't JSON -- fall through to the generic message.
+    }
     throw new ApiError(
       response.status,
-      `${path} failed: ${response.status} ${response.statusText}`,
+      detail ?? `${path} failed: ${response.status} ${response.statusText}`,
     );
   }
   return (await response.json()) as T;

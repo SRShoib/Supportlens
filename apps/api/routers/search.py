@@ -14,8 +14,9 @@ caching, highlighting for display).
 
 from functools import lru_cache
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
+from api.deps import SettingsDep
 from api.schemas.search import HighlightSpanOut, SearchRequest, SearchResponse, SearchResultOut
 from ml.inference.base import EmbeddingPredictor
 from ml.inference.highlight import highlight_matches
@@ -79,7 +80,15 @@ def _to_result(ranked: RankedHit, query: str) -> SearchResultOut:
 
 
 @router.post("", response_model=SearchResponse)
-def search(request: SearchRequest) -> SearchResponse:
+def search(request: SearchRequest, settings: SettingsDep) -> SearchResponse:
+    if not settings.search_enabled:
+        # Checked before any of the lazy loaders below run -- the point is
+        # to never import sentence-transformers/torch at all on a host
+        # where SEARCH_ENABLED=false, not just to fail after loading them.
+        raise HTTPException(
+            status_code=503,
+            detail="Search is not available on this deployment (SEARCH_ENABLED=false).",
+        )
     pool_size = _candidate_pool_size(request.top_k, request.rerank)
     ranked = retrieve(
         request.query,

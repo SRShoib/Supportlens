@@ -4,18 +4,35 @@
 # remembers them. Everything here is additive to the existing local dev /
 # docker-compose setup, never required by it.
 #
-# Two things this deployment target does differently from docker-compose,
-# both opt-in via env vars below and both no-ops for local dev:
+# Three things this deployment target does differently from docker-compose,
+# all opt-in via env vars below and all no-ops for local dev:
 #   - CHROMA_EMBEDDED_PATH: Render's free web services have no persistent
 #     disk (wiped on every restart/redeploy/spin-down-wake), so there's
 #     nowhere to run a separate long-lived `chroma` service. This switches
 #     ml/inference/vector_store.py to an on-disk chromadb.PersistentClient
 #     under /tmp instead of the networked HttpClient docker-compose uses.
+#     Moot while SEARCH_ENABLED=false below (Chroma is never touched at
+#     all), left set so flipping SEARCH_ENABLED back on later needs no
+#     other change.
 #   - RUN_DEMO_SEED_ON_BOOT: makes infra/api-entrypoint.sh re-run the
 #     idempotent data/seed/*.jsonl -> Postgres seed (a no-op after the first
-#     boot) and always rebuild the Chroma index from Postgres on every
-#     container start -- necessary because CHROMA_EMBEDDED_PATH above is
-#     wiped on every restart.
+#     boot) on every container start -- necessary because CHROMA_EMBEDDED_
+#     PATH above is wiped on every restart (the Postgres side persists fine
+#     on Neon regardless; this is about Chroma specifically, when enabled).
+#   - SEARCH_ENABLED=false: measured directly (see docs/decisions.md) --
+#     importing sentence-transformers/torch for the embed+rerank stack
+#     costs ~350MB of RAM on its own, on top of everything else, and
+#     RUN_DEMO_SEED_ON_BOOT's Chroma reindex forced that import on every
+#     boot regardless of whether anyone ever used search. Peak measured at
+#     561MB against Render free's 512MB ceiling -- confirmed OOM in
+#     practice, not just in theory. With this off, apps/api/routers/
+#     search.py's endpoint and ml/data/seed_demo.py's reindex both skip
+#     ever importing those packages; classification/NER/topics/tickets/
+#     metrics are all unaffected (measured at 260MB). Suggested-reply
+#     (RAG) shares this same embed/rerank/Chroma stack (rag.py's
+#     draft_reply), so it's unreachable too regardless of LLM_ENABLED --
+#     that's why LLM_ENABLED is back to false below rather than left on
+#     with no working feature behind it.
 #
 # Postgres is deliberately NOT a Render-managed database here: Render's own
 # free Postgres expires 30 days after creation (then a 14-day grace period
@@ -47,16 +64,19 @@ services:
         value: production
       - key: LOG_LEVEL
         value: INFO
-      # RAG suggested-reply is enabled from the start here -- deliberate
-      # choice: the deployer has their own OpenAI account-level monthly
-      # spending limit as a backstop, on top of LLM_BUDGET_USD below. Paste
-      # a real key at deploy time (Render will prompt for it); leaving it
-      # blank while LLM_ENABLED=true means the feature 503s until a key is
-      # actually set (apps/api/config.py's openai_api_key defaults to "").
+      # Search/RAG cut from this deployment for memory -- see the
+      # SEARCH_ENABLED block in the header comment above.
+      - key: SEARCH_ENABLED
+        value: "false"
+      # RAG suggested-reply is unreachable while SEARCH_ENABLED=false above
+      # (same embed/rerank/Chroma stack), so there's no working feature
+      # behind LLM_ENABLED here -- left off and OPENAI_API_KEY blank rather
+      # than asking for a real key that would do nothing. Flip both back on
+      # together if SEARCH_ENABLED is ever re-enabled on a bigger plan.
       - key: OPENAI_API_KEY
         sync: false
       - key: LLM_ENABLED
-        value: "true"
+        value: "false"
       - key: LLM_BUDGET_USD
         value: "5.00"
       - key: RAG_MAX_COMPLETION_TOKENS

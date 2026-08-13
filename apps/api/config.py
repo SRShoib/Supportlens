@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     api_port: int = 8000
     env: str = "dev"
     log_level: str = "INFO"
+    # Opt-out only (default on everywhere -- local dev, Railway, docker-
+    # compose). Search/RAG's embed/rerank stack (sentence-transformers +
+    # torch) costs ~350MB of RAM just from being imported, on top of
+    # whatever else is loaded -- measured to exceed Render's free-tier
+    # 512MB ceiling (see docs/decisions.md). Setting this false makes
+    # apps/api/routers/search.py and rag.py refuse with a 503 before ever
+    # reaching their lazy loaders, and ml/data/seed_demo.py skip the Chroma
+    # reindex step -- so the heavy imports never happen at all, not just
+    # later. Classification/NER/topics/tickets/metrics are all unaffected.
+    search_enabled: bool = True
 
     # Data
     data_dir: str = "./data"

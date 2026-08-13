@@ -1,4 +1,5 @@
 import pytest
+from api.config import Settings, get_settings
 from api.main import app
 from api.routers import search
 from fastapi.testclient import TestClient
@@ -142,3 +143,24 @@ def test_rejects_empty_query() -> None:
 def test_rejects_top_k_out_of_range() -> None:
     response = client.post("/search", json={"query": "order", "top_k": 0})
     assert response.status_code == 422
+
+
+def test_search_disabled_returns_503_without_loading_any_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # No _patch_no_rerank here on purpose -- the real (unpatched) lazy
+    # loaders stay wired up, so a 200 response would mean this test tried
+    # to actually import sentence-transformers/chromadb. Proves the
+    # SEARCH_ENABLED=false gate runs before any of that, the whole point
+    # of apps/api/config.py's search_enabled flag.
+    disabled_settings = Settings(_env_file=None, search_enabled=False)  # type: ignore[call-arg]
+    app.dependency_overrides[get_settings] = lambda: disabled_settings
+    try:
+        response = client.post("/search", json={"query": "order"})
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Search is not available on this deployment (SEARCH_ENABLED=false)."
+    )
