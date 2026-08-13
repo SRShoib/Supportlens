@@ -47,7 +47,10 @@ export function SpanMetricsTable({ perType }: SpanMetricsTableProps) {
           {entries.map(([label, m]) => {
             const step = bucketIndex(m.f1);
             return (
-              <tr key={label} className="border-t border-zinc-100 dark:border-zinc-800">
+              <tr
+                key={label}
+                className="border-t border-zinc-100 transition-colors duration-150 hover:bg-indigo-50/50 dark:border-white/5 dark:hover:bg-indigo-500/5"
+              >
                 <td className="py-1 pr-3 text-zinc-700 dark:text-zinc-300">{label}</td>
                 <td
                   className={`py-1 pr-3 text-right tabular-nums ${SEQUENTIAL_STEPS[step]} ${

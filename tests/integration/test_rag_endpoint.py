@@ -2,7 +2,7 @@ import uuid
 from unittest.mock import MagicMock
 
 import pytest
-from api.config import Settings
+from api.config import Settings, get_settings
 from api.db import session as session_module
 from api.db.models import AuthorRole, Message, Ticket, TicketSource
 from api.db.session import make_engine
@@ -115,6 +115,26 @@ def _patch_model_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_unknown_ticket_returns_404(db_session: Session, client: TestClient) -> None:
     response = client.post(f"/tickets/{uuid.uuid4()}/suggested-reply")
     assert response.status_code == 404
+
+
+def test_search_disabled_returns_503_before_looking_up_the_ticket(
+    db_session: Session, client: TestClient
+) -> None:
+    # Unknown ticket id and no fixture-created ticket -- if this reached
+    # the DB lookup it'd 404, not 503. Proves the SEARCH_ENABLED=false
+    # gate runs first, same guarantee test_search_endpoint.py's disabled
+    # test proves for /search.
+    disabled_settings = Settings(_env_file=None, search_enabled=False)  # type: ignore[call-arg]
+    app.dependency_overrides[get_settings] = lambda: disabled_settings
+    try:
+        response = client.post(f"/tickets/{uuid.uuid4()}/suggested-reply")
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Suggested replies are not available on this deployment (SEARCH_ENABLED=false)."
+    )
 
 
 def test_ticket_with_no_customer_message_returns_422(

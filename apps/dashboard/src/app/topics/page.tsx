@@ -1,4 +1,5 @@
 import { EmergingIssuesPanel } from "@/components/emerging-issues-panel";
+import { TagIcon } from "@/components/icons";
 import { TopicsOverTimeChart } from "@/components/topics-over-time-chart";
 import { getEmergingIssues, getTopicVolume, listTopics } from "@/lib/api";
 
@@ -17,29 +18,47 @@ export default async function TopicsPage() {
   const discoveredTopics = topics.filter((t) => t.topic_key !== -1);
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
-      <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">Topics</h1>
-      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-        {discoveredTopics.length} topic{discoveredTopics.length === 1 ? "" : "s"} discovered from the
-        real-ticket corpus
-      </p>
+    <div className="mx-auto max-w-6xl px-6 py-10">
+      <div className="animate-fade-in-up">
+        <div className="flex items-center gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">
+            <TagIcon className="h-5 w-5" />
+          </span>
+          <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+            Topics
+          </h1>
+        </div>
+        <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
+          {discoveredTopics.length} topic{discoveredTopics.length === 1 ? "" : "s"} discovered from
+          the real-ticket corpus
+        </p>
+      </div>
 
-      <section className="mt-8">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">Volume over time</h2>
-        <div className="mt-3 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+      <section className="animate-fade-in-up mt-8" style={{ animationDelay: "60ms" }}>
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+          <span className="h-3.5 w-1 rounded-full bg-violet-500" />
+          Volume over time
+        </h2>
+        <div className="surface-card mt-3 p-4">
           <TopicsOverTimeChart weeks={volume.weeks} series={volume.series} />
         </div>
       </section>
 
-      <section className="mt-8">
+      <section className="animate-fade-in-up mt-8" style={{ animationDelay: "120ms" }}>
         <EmergingIssuesPanel issues={emerging} />
       </section>
 
-      <section className="mt-8">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">All topics</h2>
-        <ul className="mt-3 divide-y divide-zinc-200 dark:divide-zinc-800">
+      <section className="animate-fade-in-up mt-8" style={{ animationDelay: "180ms" }}>
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+          <span className="h-3.5 w-1 rounded-full bg-violet-500" />
+          All topics
+        </h2>
+        <ul className="surface-card mt-3 divide-y divide-zinc-200/70 dark:divide-white/10">
           {topics.map((topic) => (
-            <li key={topic.id} className="flex items-center justify-between gap-4 py-3">
+            <li
+              key={topic.id}
+              className="flex items-center justify-between gap-4 px-4 py-3.5 transition-colors duration-150 hover:bg-violet-50/60 dark:hover:bg-violet-500/5"
+            >
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-50">
                   {topic.topic_key === -1 ? "Outliers (uncategorized)" : topic.label}
@@ -48,7 +67,7 @@ export default async function TopicsPage() {
                   {topic.keywords.join(", ") || "—"}
                 </p>
               </div>
-              <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-1 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+              <span className="shrink-0 rounded-full bg-violet-50 px-2.5 py-1 text-xs font-medium text-violet-700 dark:bg-violet-500/10 dark:text-violet-300">
                 {topic.size} ticket{topic.size === 1 ? "" : "s"}
               </span>
             </li>

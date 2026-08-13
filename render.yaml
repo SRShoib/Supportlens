@@ -1,0 +1,83 @@
+# Render Blueprint for apps/api's free-tier deployment (see docs/decisions.md
+# for the full reasoning). Deploy via Render's "New Blueprint" flow pointing
+# at this repo -- Render prompts for every `sync: false` value once, then
+# remembers them. Everything here is additive to the existing local dev /
+# docker-compose setup, never required by it.
+#
+# Three things this deployment target does differently from docker-compose,
+# all opt-in via env vars below and all no-ops for local dev:
+#   - CHROMA_EMBEDDED_PATH: Render's free web services have no persistent
+#     disk (wiped on every restart/redeploy/spin-down-wake), so there's
+#     nowhere to run a separate long-lived `chroma` service. This switches
+#     ml/inference/vector_store.py to an on-disk chromadb.PersistentClient
+#     under /tmp instead of the networked HttpClient docker-compose uses.
+#     Moot while SEARCH_ENABLED=false below (Chroma is never touched at
+#     all), left set so flipping SEARCH_ENABLED back on later needs no
+#     other change.
+#   - RUN_DEMO_SEED_ON_BOOT: makes infra/api-entrypoint.sh re-run the
+#     idempotent data/seed/*.jsonl -> Postgres seed (a no-op after the first
+#     boot) on every container start -- necessary because CHROMA_EMBEDDED_
+#     PATH above is wiped on every restart (the Postgres side persists fine
+#     on Neon regardless; this is about Chroma specifically, when enabled).
+#   - SEARCH_ENABLED=false: measured directly (see docs/decisions.md) --
+#     importing sentence-transformers/torch for the embed+rerank stack
+#     costs ~350MB of RAM on its own, on top of everything else, and
+#     RUN_DEMO_SEED_ON_BOOT's Chroma reindex forced that import on every
+#     boot regardless of whether anyone ever used search. Peak measured at
+#     561MB against Render free's 512MB ceiling -- confirmed OOM in
+#     practice, not just in theory. With this off, apps/api/routers/
+#     search.py's endpoint and ml/data/seed_demo.py's reindex both skip
+#     ever importing those packages; classification/NER/topics/tickets/
+#     metrics are all unaffected (measured at 260MB). Suggested-reply
+#     (RAG) shares this same embed/rerank/Chroma stack (rag.py's
+#     draft_reply), so it's unreachable too regardless of LLM_ENABLED --
+#     that's why LLM_ENABLED is back to false below rather than left on
+#     with no working feature behind it.
+#
+# Postgres is deliberately NOT a Render-managed database here: Render's own
+# free Postgres expires 30 days after creation (then a 14-day grace period
+# before deletion) -- Neon's free tier is a genuinely permanent Postgres
+# free tier instead. Create a Neon project separately and paste its
+# connection string (rewritten to the postgresql+psycopg:// scheme
+# apps/api/db/session.py's create_engine() needs -- Neon's own dashboard
+# gives you a plain postgresql:// one) into DATABASE_URL below.
+
+services:
+  - name: supportlens-api
+    type: web
+    runtime: docker
+    plan: free
+    dockerfilePath: ./infra/api.Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    envVars:
+      # Paste Neon's connection string here, with postgresql:// changed to
+      # postgresql+psycopg:// -- e.g.
+      # postgresql+psycopg://user:pass@ep-xxx.neon.tech/supportlens?sslmode=require
+      - key: DATABASE_URL
+        sync: false
+      - key: CHROMA_EMBEDDED_PATH
+        value: /tmp/chroma_data
+      - key: RUN_DEMO_SEED_ON_BOOT
+        value: "true"
+      - key: ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      # Search/RAG cut from this deployment for memory -- see the
+      # SEARCH_ENABLED block in the header comment above.
+      - key: SEARCH_ENABLED
+        value: "false"
+      # RAG suggested-reply is unreachable while SEARCH_ENABLED=false above
+      # (same embed/rerank/Chroma stack), so there's no working feature
+      # behind LLM_ENABLED here -- left off and OPENAI_API_KEY blank rather
+      # than asking for a real key that would do nothing. Flip both back on
+      # together if SEARCH_ENABLED is ever re-enabled on a bigger plan.
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: LLM_ENABLED
+        value: "false"
+      - key: LLM_BUDGET_USD
+        value: "5.00"
+      - key: RAG_MAX_COMPLETION_TOKENS
+        value: "400"

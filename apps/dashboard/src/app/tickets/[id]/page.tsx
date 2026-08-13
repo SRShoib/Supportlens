@@ -65,13 +65,17 @@ export default async function TicketDetailPage({ params }: PageProps<"/tickets/[
   ]);
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10">
-      <Link href="/tickets" className="text-sm text-zinc-500 hover:underline dark:text-zinc-400">
-        ← All tickets
+    <div className="mx-auto max-w-4xl px-6 py-10">
+      <Link
+        href="/tickets"
+        className="group inline-flex items-center gap-1 text-sm text-zinc-500 transition-colors duration-200 hover:text-blue-600 dark:text-zinc-400 dark:hover:text-blue-400"
+      >
+        <span className="transition-transform duration-200 group-hover:-translate-x-0.5">←</span> All
+        tickets
       </Link>
 
-      <header className="mt-4">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+      <header className="animate-fade-in-up mt-4">
+        <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
           Ticket {ticket.external_id}
         </h1>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
@@ -95,14 +99,23 @@ export default async function TicketDetailPage({ params }: PageProps<"/tickets/[
         {ticket.messages.map((message, index) => (
           <li
             key={message.id}
-            className={`rounded-lg border p-4 ${
+            className={`animate-fade-in-up rounded-xl border p-4 shadow-sm transition-shadow duration-200 hover:shadow-md ${
               message.author_role === "customer"
-                ? "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
-                : "border-blue-100 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/30"
+                ? "border-zinc-200/80 bg-white/90 dark:border-white/10 dark:bg-zinc-900/60"
+                : "border-blue-200/70 bg-blue-50/80 dark:border-blue-400/20 dark:bg-blue-500/10"
             }`}
+            style={{ animationDelay: `${Math.min(index, 12) * 40}ms` }}
           >
             <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-              <span className="font-medium tracking-wide uppercase">{message.author_role}</span>
+              <span
+                className={`font-semibold tracking-wide uppercase ${
+                  message.author_role === "customer"
+                    ? "text-zinc-500 dark:text-zinc-400"
+                    : "text-blue-600 dark:text-blue-300"
+                }`}
+              >
+                {message.author_role}
+              </span>
               {message.sent_at && <span>{formatDateTime(message.sent_at)}</span>}
             </div>
             <p className="mt-2 text-sm whitespace-pre-wrap text-zinc-800 dark:text-zinc-100">
@@ -118,7 +131,7 @@ export default async function TicketDetailPage({ params }: PageProps<"/tickets/[
           </li>
         ))}
         {ticket.messages.length === 0 && (
-          <li className="py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">
+          <li className="surface-card py-10 text-center text-sm text-zinc-500 dark:text-zinc-400">
             This ticket has no messages.
           </li>
         )}

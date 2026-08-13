@@ -125,7 +125,7 @@ export function TopicsOverTimeChart({ weeks, series }: TopicsOverTimeChartProps)
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         role="img"
         aria-label={`Weekly ticket volume for ${shown.length} topics across ${weeks.length} weeks, ${formatWeek(weeks[0])} through ${formatWeek(weeks[weeks.length - 1])}`}
-        className="w-full"
+        className="animate-fade-in w-full"
       >
         <line
           x1={PADDING_LEFT}
@@ -199,14 +199,17 @@ export function TopicsOverTimeChart({ weeks, series }: TopicsOverTimeChartProps)
 
       <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs">
         {shown.map((s, seriesIndex) => (
-          <li key={s.topic_id} className="flex items-center gap-1.5">
+          <li
+            key={s.topic_id}
+            className="flex items-center gap-1.5 rounded-full px-1.5 py-0.5 transition-colors duration-150 hover:bg-zinc-100 dark:hover:bg-white/5"
+          >
             <span
               className={`h-2 w-2 shrink-0 rounded-full ${SERIES_SWATCH_CLASS[seriesIndex % SERIES_SWATCH_CLASS.length]}`}
             />
             <span className="text-zinc-700 dark:text-zinc-300">{s.label}</span>
             <span className="text-zinc-400 dark:text-zinc-500">({seriesTotal(s)})</span>
             {s.points.some((p) => p.is_emerging) && (
-              <span className="rounded-full bg-red-100 px-1.5 py-0.5 font-medium text-red-700 dark:bg-red-950 dark:text-red-400">
+              <span className="rounded-full bg-red-100 px-1.5 py-0.5 font-medium text-red-700 dark:bg-red-500/15 dark:text-red-400">
                 emerging
               </span>
             )}
