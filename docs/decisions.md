@@ -933,3 +933,38 @@ fresh machine has no prior containers to collide with, so this doesn't invalidat
 clone-to-running" claim itself, but it's a real footgun worth knowing about. Not changed in the compose file
 itself (the hardcoded project name is otherwise a reasonable default for the common case), but worth this
 explicit warning for exactly the scenario that caused it.
+
+## 2026-08-13 — Render deploy OOM: Search/RAG cut from that target specifically, via a new `SEARCH_ENABLED` flag
+
+**Finding:** the live Render deployment (DEPLOY.md) failed with "Ran out of memory (used over 512MB)". Measured
+directly (native `psutil` RSS profiling at staged import points, not guessed): importing `sentence_transformers`
++ `torch` for the embed/rerank stack alone costs ~350MB on top of everything else the API already loads, and
+`RUN_DEMO_SEED_ON_BOOT` was forcing that import on *every* container start (via `ml/data/seed_demo.py`'s
+`index_chroma()`) regardless of whether any request ever used search — confirmed peak 561MB against Render
+free's 512MB ceiling, a real reproduction, not just a theoretical overrun. Everything else (classification/
+NER/topics/tickets/metrics) measured at 260MB, comfortable margin.
+**Decision:** added `apps/api/config.py`'s `search_enabled: bool = True` (default on everywhere — local dev,
+docker-compose, Railway) and set it `false` only in `render.yaml`. `apps/api/routers/search.py` and `rag.py`
+both check it first, before any of their `@lru_cache`-wrapped lazy loaders run, and 503 with a plain-English
+detail message instead (`"Search is not available on this deployment (SEARCH_ENABLED=false)."`); `ml/data/
+seed_demo.py`'s `main()` skips `index_chroma()` the same way. Re-measured after the fix: 210MB peak on the
+Render config, comfortably under the ceiling. `apps/dashboard/src/lib/api.ts`'s `apiFetch` was also fixed to
+read FastAPI's `{"detail": ...}` body on non-2xx responses (it previously only ever showed a generic `"<path>
+failed: 503 Service Unavailable"` line) so this message actually reaches the user on the Search page and the
+ticket detail page's suggested-reply panel, not just the API logs.
+**Consequence for RAG:** `rag.py`'s `draft_reply` retrieves candidates through the exact same embed/rerank/
+Chroma stack as `/search` (that's the whole "R" in RAG) before ever reaching the LLM call, so suggested-reply
+is unreachable on Render regardless of `LLM_ENABLED` — checked by the same `search_enabled` guard, first thing
+in the handler. `render.yaml`'s `LLM_ENABLED` was reverted from `true` back to `false` (and the deploy-time
+"paste a real `OPENAI_API_KEY`" prompt dropped) as a direct result: leaving it on would have asked for a real
+key that could never do anything on this specific deployment target.
+**Alternatives considered and rejected (see conversation, not written up separately):** moving embedding
+computation to OpenAI's embeddings API instead of a local model (still needs `torch`-free but nonzero RAM, adds
+a second paid-API surface CLAUDE.md's "every OpenAI call goes through `ml/inference/llm_client.py`" rule would
+have to be re-scoped for, and turns every search query into a billed call); upgrading to a paid Render plan
+(contradicts the actual ask, which was a genuinely free deployment). Cutting the feature from this one
+deployment target — while leaving it fully intact in local dev, `docker-compose`, and the Railway alternative
+path — was the user's explicit choice ("do it option 1").
+**Why this matters:** the same measured-not-guessed discipline CLAUDE.md's "no metric without an eval run" rule
+asks for elsewhere in this project — the fix is sized to the actual confirmed overrun (561MB) and re-verified
+against the actual fixed configuration (210MB), not adjusted until a build merely "seemed like it should work."

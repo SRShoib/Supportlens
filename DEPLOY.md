@@ -17,6 +17,18 @@ missing (a pre-existing 503, not something added for this) — including
 entity highlighting on ticket pages, which falls back to rules-based
 extraction automatically (`src/lib/api.ts`'s `predictEntities`).
 
+**Search and suggested-reply (RAG) are also not live on this Render
+deployment**, for the same reason (RAM, not missing weights this time):
+measured directly, importing the embed/rerank stack (`sentence-transformers`
++ `torch`) costs ~350MB on its own, on top of everything else — confirmed
+561MB peak against Render free's 512MB ceiling, a real OOM in production,
+not a theoretical concern (`docs/decisions.md`, 2026-08-13). `render.yaml`
+sets `SEARCH_ENABLED=false` for this target only; `/search` and the ticket
+detail page's "Generate suggested reply" both return a clear "not available
+on this deployment" message instead of erroring opaquely. Local dev,
+`docker-compose`, and the Railway path below all keep `SEARCH_ENABLED=true`
+(the default) and both features work normally there.
+
 ## Why this architecture (Neon + Render, not Render's own Postgres)
 
 - **Render's own free Postgres expires 30 days after creation** (then a
@@ -27,12 +39,15 @@ extraction automatically (`src/lib/api.ts`'s `predictEntities`).
 - **Render's free web services have no persistent disk at all** — local
   filesystem changes are wiped on every restart, redeploy, *and*
   spin-down-then-wake. That rules out running Chroma as a normal networked
-  service the way `docker-compose.yml` does locally. Instead, this deploy
-  target switches `ml/inference/vector_store.py` to an embedded, on-disk
-  Chroma client (`CHROMA_EMBEDDED_PATH`) and rebuilds the small index from
-  Postgres on every boot (`RUN_DEMO_SEED_ON_BOOT`) — both opt-in env vars,
-  both no-ops for local dev/docker-compose, already wired up in
-  `render.yaml`.
+  service the way `docker-compose.yml` does locally; `render.yaml` sets
+  `CHROMA_EMBEDDED_PATH` so `ml/inference/vector_store.py` would use an
+  embedded, on-disk Chroma client instead, if search were ever re-enabled
+  on this target. It's currently moot: `SEARCH_ENABLED=false` on this
+  deployment (see the note above) means Chroma is never touched at all —
+  the 512MB free-tier ceiling couldn't fit the embed/rerank stack needed to
+  populate or query it in the first place. `RUN_DEMO_SEED_ON_BOOT` still
+  re-runs the idempotent Postgres seed on every boot (cheap, unrelated to
+  the memory issue) — just skips the Chroma half now.
 - **Cold starts stack.** Render's free tier sleeps a service after 15
   minutes of no traffic (~30-60s to wake). Vercel's Hobby plan kills any
   serverless function after 10s. If both have gone idle, the *first* visit
@@ -66,13 +81,14 @@ live on this or any other free/cheap path.
 1. Sign up at [render.com](https://render.com) and connect your GitHub
    account.
 2. **New > Blueprint**, select the `Supportlens` repo. Render reads
-   `render.yaml` from the repo root automatically and prompts for two
-   values: `DATABASE_URL` — paste the rewritten Neon connection string
-   from step 1 — and `OPENAI_API_KEY` — paste your real OpenAI key here
-   (RAG is enabled by default in this config; see the note below on why).
-3. Deploy. First build takes a while (installs torch/transformers/
-   sentence-transformers/chromadb — the heaviest part of the whole setup,
-   expect several minutes).
+   `render.yaml` from the repo root automatically and prompts for
+   `DATABASE_URL` — paste the rewritten Neon connection string from step 1.
+   It'll also prompt for `OPENAI_API_KEY` (marked `sync: false` in the
+   blueprint) — leave it blank; `LLM_ENABLED=false` on this deployment
+   means it isn't used (see the note below on why).
+3. Deploy. First build takes a while regardless (the image still installs
+   the full ML stack, shared with local dev/Railway — expect several
+   minutes).
 4. Once live, note the public URL Render assigns, e.g.
    `https://supportlens-api.onrender.com`.
 5. Verify: `curl https://<your-render-url>/healthz` should return
@@ -80,19 +96,14 @@ live on this or any other free/cheap path.
    service logs — most likely cause is `DATABASE_URL`'s scheme (step 1.4)
    or a Neon connection string that still has a placeholder password.
 
-**About the RAG / suggested-reply feature:** `render.yaml` has
-`LLM_ENABLED=true` by default — it goes live as soon as you paste a real
-`OPENAI_API_KEY` at deploy time. This is a deliberate choice, not an
-oversight: the URL is public once deployed, so anyone who finds it could
-run up spend against the app's own `$5` `LLM_BUDGET_USD` guard — the
-reason this is safe to leave on is having your own **OpenAI account-level
-monthly spending limit** as a hard backstop on the actual dollar exposure
-(set one at platform.openai.com if you haven't). The one remaining
-trade-off (not a money risk, just availability) is that whichever cap
-trips first — yours or the app's — pauses the feature for everyone,
-including you, until it resets. If you'd rather avoid that entirely,
-leave `OPENAI_API_KEY` blank and manually set `LLM_ENABLED=false` in
-Render's dashboard after deploying.
+**About RAG / suggested-reply on this deployment:** it's unavailable here,
+not misconfigured — see the Search/RAG note near the top of this file.
+`render.yaml` sets `LLM_ENABLED=false` deliberately: suggested-reply shares
+`/search`'s embed/rerank/Chroma stack for retrieval before it ever reaches
+the LLM call, and that stack is what's disabled (`SEARCH_ENABLED=false`)
+for RAM. Pasting a real `OPENAI_API_KEY` here wouldn't enable anything. If
+you want both features live, use the Railway path instead (bottom of this
+file) — no memory ceiling there to work around.
 
 ## 3. Keep the API warm (recommended, ~2 minutes)
 
@@ -121,16 +132,16 @@ Render's dashboard after deploying.
 
 Visit the Vercel URL. Check, in order: **Overview** loads with real stat
 tiles, **Tickets** lists real tickets, a **ticket detail** page shows
-summary/sentiment/entities, **Topics** shows the volume chart, **Search**
-returns results, **Metrics** shows real eval-run numbers, **Try it live**
-returns baseline predictions (transformer column will correctly show "not
-available" — expected, already-handled degradation, not a bug).
+summary/sentiment/entities, **Topics** shows the volume chart, **Metrics**
+shows real eval-run numbers, **Try it live** returns baseline predictions
+(transformer column will correctly show "not available" — expected,
+already-handled degradation, not a bug).
 
-Since RAG is enabled on this deploy: open a ticket and click **"Generate
-suggested reply"** — it should return a draft with cited sources within a
-few seconds. If it errors instead, the most likely cause is
-`OPENAI_API_KEY` not actually being set on the Render service (Environment
-tab) despite `LLM_ENABLED=true`.
+**Search** and a ticket detail page's **"Generate suggested reply"** button
+will both show "not available on this deployment (SEARCH_ENABLED=false)" —
+expected on Render (see the note near the top of this file), not a bug to
+chase. If either shows a different, opaque error instead, something else is
+wrong — check the Render service logs.
 
 If the very first load times out: that's the cold-start-stacking issue —
 refresh once, or make sure step 3 is actually set up.

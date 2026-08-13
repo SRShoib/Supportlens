@@ -65,6 +65,15 @@ def _build_llm_client(db: Session, settings: Settings) -> LLMClient:
 
 @router.post("/{ticket_id}/suggested-reply", response_model=SuggestedReplyResponse)
 def suggested_reply(ticket_id: UUID, db: DbDep, settings: SettingsDep) -> SuggestedReplyResponse:
+    if not settings.search_enabled:
+        # Suggested-reply retrieval shares search.py's embed/rerank/Chroma
+        # stack (ml/inference/rag_reply.py's draft_reply calls the same
+        # embedder/store/reranker) -- same reason, same guard, checked
+        # before any of the lazy loaders below run.
+        raise HTTPException(
+            status_code=503,
+            detail="Suggested replies are not available on this deployment (SEARCH_ENABLED=false).",
+        )
     stmt = select(Ticket).options(selectinload(Ticket.messages)).where(Ticket.id == ticket_id)
     ticket = db.scalars(stmt).first()
     if ticket is None:
