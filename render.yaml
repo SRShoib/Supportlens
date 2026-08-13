@@ -47,15 +47,16 @@ services:
         value: production
       - key: LOG_LEVEL
         value: INFO
-      # Optional -- leave OPENAI_API_KEY blank and LLM_ENABLED=false to
-      # deploy without the RAG suggested-reply feature at all (everything
-      # else works fully without it). Set both when ready to demo it live;
-      # remember this is a *public* URL once deployed, so anyone who finds
-      # it could exhaust the $5 budget guard before you get to show it off.
+      # RAG suggested-reply is enabled from the start here -- deliberate
+      # choice: the deployer has their own OpenAI account-level monthly
+      # spending limit as a backstop, on top of LLM_BUDGET_USD below. Paste
+      # a real key at deploy time (Render will prompt for it); leaving it
+      # blank while LLM_ENABLED=true means the feature 503s until a key is
+      # actually set (apps/api/config.py's openai_api_key defaults to "").
       - key: OPENAI_API_KEY
         sync: false
       - key: LLM_ENABLED
-        value: "false"
+        value: "true"
       - key: LLM_BUDGET_USD
         value: "5.00"
       - key: RAG_MAX_COMPLETION_TOKENS
